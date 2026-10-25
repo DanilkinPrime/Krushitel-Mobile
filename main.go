@@ -336,8 +336,7 @@ return
 }
 // Вывод результатов по окончании
 crashStatus.SetText("Готово!")
-appendLog(crashLog, fmt.Sprintf("\n[FINISH] Скан завершен.\nВсего проверено комбинаций: %d\nНайдено живых камер: %d\nРезультаты сохранены.",
-stats.Checked, stats.Alive))
+appendLog(crashLog, fmt.Printf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
 }(outFile)
 }, myWindow)
 saveCloudDialog.SetFileName(defaultCloudFile)
