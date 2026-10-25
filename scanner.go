@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha1"
+	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -70,7 +71,7 @@ func (g *wsseGenerator) Gen() (digest, nonceStr, curdate string) {
 }
 
 // ScanCloudPrefix выполняет асинхронное сканирование пространства серийных номеров по заданному префиксу
-func ScanCloudPrefix(ctx context.Context, ctprefix string, maxWorkers int, rpsLimit int, onAlive func(serial string)) (*ScanStats, error) {
+func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimit int, onAlive func(serial string)) (*ScanStats, error) {
 	startTime := time.Now()
 	
 	prefix = strings.ToUpper(strings.TrimSpace(prefix))
@@ -213,7 +214,7 @@ func ScanCloudPrefix(ctx context.Context, ctprefix string, maxWorkers int, rpsLi
 		go func() {
 			defer wg.Done()
 			var serialBuf [15]byte
-			copy(serialBuf[:10], prefix)
+			copy(serialBuf[:10], []byte(prefix)) // ИСПРАВЛЕНО: приведение string к []byte для корректного copy()
 
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
