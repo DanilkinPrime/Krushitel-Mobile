@@ -336,7 +336,7 @@ return
 }
 // Вывод результатов по окончании
 crashStatus.SetText("Готово!")
-appendLog(crashLog, fmt.Printf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
+appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
 }(outFile)
 }, myWindow)
 saveCloudDialog.SetFileName(defaultCloudFile)
