@@ -161,6 +161,7 @@ func main() {
 
 				saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
 					var checkedCount uint64 = 0
+					successCount := 0
 					if err != nil {
 						statusLabel.SetText("Ошибка создания файла: " + err.Error())
 						return
