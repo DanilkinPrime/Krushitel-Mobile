@@ -50,7 +50,9 @@ func main() {
 	logContent.SetPlaceHolder("Здесь будут отображаться шаги работы...")
 	logContent.Disable()
 
-	backToMenuBtn1 := widget.NewButton("Назад в меню", func() { showMenu() })
+	backToMenuBtn1 := widget.NewButton("Назад в меню", func() {
+		showMenu()
+	})
 
 	var ruleEntry *widget.Button
 	ruleEntry = widget.NewButton("Нет", func() {
@@ -125,15 +127,13 @@ func main() {
 				for i, line := range lines {
 					line = strings.TrimSpace(line)
 					if line == "" || strings.HasPrefix(line, "#") {
-						continue 
+						continue
 					}
-
 					parsedLines := ParseTarget(line)
 					if len(parsedLines) == 0 {
 						appendLog(logContent, fmt.Sprintf("[WARN] Строка %d пропущена парсером: %s", i+1, line))
 						continue
 					}
-
 					for _, parsed := range parsedLines {
 						parsed = strings.TrimSpace(parsed)
 						if parsed == "" {
@@ -167,13 +167,11 @@ func main() {
 						statusLabel.SetText("Сохранение результатов отменено")
 						return
 					}
-
 					appendLog(logContent, "[SYSTEM] Выходной файл подтвержден. Запуск сетевых воркеров...")
 					statusLabel.SetText(fmt.Sprintf("Сканирование %d целей...", len(finalTargets)))
 
 					go func(out fyne.URIWriteCloser) {
 						defer out.Close()
-
 						opts := Options{
 							Targets:     finalTargets,
 							Port:        basePort,
@@ -238,7 +236,6 @@ func main() {
 				saveDialog.Show()
 			}(reader)
 		}, myWindow)
-
 		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".txt"}))
 		fileDialog.Show()
 	})
@@ -282,13 +279,39 @@ func main() {
 	crashLog.SetPlaceHolder("Логи сканирования облака...")
 	crashLog.Disable()
 
-	backToMenuBtn2 := widget.NewButton("Назад в меню", func() { showMenu() })
+	backToMenuBtn2 := widget.NewButton("Назад в меню", func() {
+		showMenu()
+	})
+
+	var selectedCloudFile fyne.URIReadCloser
+
+	btnChooseCloudFile := widget.NewButton("Выбрать файл", func() {
+		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil {
+				crashStatus.SetText("Ошибка выбора файла: " + err.Error())
+				return
+			}
+			if reader == nil {
+				crashStatus.SetText("Выбор файла отменен")
+				return
+			}
+			selectedCloudFile = reader
+			crashStatus.SetText("Выбран файл: " + reader.URI().Name())
+		}, myWindow)
+		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".txt"}))
+		fileDialog.Show()
+	})
 
 	// Запуск Облачного Сканирования с сохранением в txt
 	btnStartCloudScan := widget.NewButton("Запустить Облачный Скан", func() {
 		prefix := strings.TrimSpace(prefixEntry.Text)
 		if len(prefix) != 10 {
 			crashStatus.SetText("Ошибка: префикс должен содержать 10 символов!")
+			return
+		}
+
+		if selectedCloudFile == nil {
+			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
 			return
 		}
 
@@ -302,21 +325,27 @@ func main() {
 			rps = 100
 		}
 
-		// Сначала просим пользователя указать файл для сохранения реальных серийных номеров
-		timestamp := time.Now().Format("20060102_150405")
-		defaultCloudFile := fmt.Sprintf("cloud_found_%s_%s.txt", prefix, timestamp)
-
-		saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-			if err != nil {
-				crashStatus.SetText("Ошибка создания файла: " + err.Error())
-				return
-			}
-			if outFile == nil {
-				crashStatus.SetText("Сканирование отменено (не выбран файл)")
-				return
-			}
-
-			crashStatus.SetText("Сканирование запущено...")
+// Читаем данные из входного файла перед запуском сканера
+defer selectedCloudFile.Close()
+fileData, err := io.ReadAll(selectedCloudFile)
+if err != nil {
+crashStatus.SetText("Не удалось прочитать исходный файл: " + err.Error())
+return
+}
+_ = fileData // Переменная fileData содержит сырые байты файла для вашей внутренней логики
+// Сначала просим пользователя указать файл для сохранения реальных серийных номеров
+timestamp := time.Now().Format("20060102_150405")
+defaultCloudFile := fmt.Sprintf("cloud_found_%s_%s.txt", prefix, timestamp)
+saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+if err != nil {
+crashStatus.SetText("Ошибка создания файла: " + err.Error())
+return
+}
+if outFile == nil {
+crashStatus.SetText("Сканирование отменено (не выбран файл)")
+return
+}
+crashStatus.SetText("Сканирование запущено...")
 crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация ScanCloudPrefix...\n")
 // Запускаем сам скан в фоновом потоке
 go func(out io.WriteCloser) {
@@ -346,6 +375,7 @@ cloudForm := widget.NewForm(
 widget.NewFormItem("Префикс (10 симв.):", prefixEntry),
 widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
 widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
+widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
 )
 crashContent := container.NewVBox(
 crashTitle,
