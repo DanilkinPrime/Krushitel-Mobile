@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"strconv"
 	"strings"
 	"time"
@@ -159,6 +160,7 @@ func main() {
 				defaultFileName := fmt.Sprintf("%s_%s.txt", outNameBase, timestamp)
 
 				saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+					var checkedCount uint64 = 0
 					if err != nil {
 						statusLabel.SetText("Ошибка создания файла: " + err.Error())
 						return
@@ -182,9 +184,16 @@ func main() {
 						}
 
 						LogHook = func(format string, args ...any) {
-							msg := fmt.Sprintf(format, args...)
-							appendLog(logContent, "[CORE] " + msg)
-						}
+    msg := fmt.Sprintf(format, args...)
+    appendLog(logContent, "[CORE] " + msg)
+
+    // Увеличиваем счетчик при каждом логе проверки
+    atomic.AddUint64(&checkedCount, 1)
+
+    // Обновляем статус на экране: сколько проверено из общего числа
+    statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)", 
+        atomic.LoadUint64(&checkedCount), len(finalTargets), successCount))
+}
 
 						ctx := context.Background()
 						successCount := 0
