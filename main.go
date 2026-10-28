@@ -156,7 +156,8 @@ func main() {
 					return
 				}
 
-				defaultFileName := fmt.Sprintf("prefix.txt")
+				timestamp := time.Now().Format("20060102_150405")
+				defaultFileName := fmt.Sprintf("%s_%s.txt", outNameBase, timestamp)
 
 				saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
 					var checkedCount uint64 = 0
@@ -311,7 +312,6 @@ func main() {
 		fileDialog.Show()
 	})
 
-		// Запуск Облачного Сканирования с автоматическим определением режима (Префикс или Серийники)
 	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
 		prefix := strings.TrimSpace(prefixEntry.Text)
 		if selectedCloudFile == nil {
@@ -348,7 +348,7 @@ func main() {
 			if line != "" && !strings.HasPrefix(line, "#") {
 				totalValidLines++
 				if sampleSerial == "" {
-					sampleSerial = line // Запоминаем первую строку для теста
+					sampleSerial = line // Запоминаем первую валидную строку для теста
 				}
 			}
 		}
@@ -368,6 +368,7 @@ func main() {
 			crashStatus.SetText("Обнаружены серийники! Запуск P2P модуля...")
 			crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Инициализация воркеров...\n")
 
+			// Таймаут для P2P операций
 			connTimeout := 6 * time.Second
 			moduleChan := make(chan P2PScanResult, 100)
 
@@ -385,20 +386,14 @@ func main() {
 
 				vulnerableCount := 0
 				var currentIdx int64 = 0
-				
-				// Слайс для накопления успешных/уязвимых результатов в памяти мобильного устройства
-				var reportLines []string
 
 				// Читаем результаты из канала модуля в реальном времени
 				for res := range moduleChan {
 					atomic.AddInt64(&currentIdx, 1)
 					statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
 					
-					// Выводим в лог на экране смартфона
+					// Мгновенно выводим в лог на экране смартфона
 					appendLog(crashLog, statusText)
-
-					// Добавляем запись в отчет (вы можете форматировать строку по своему вкусу)
-					reportLines = append(reportLines, fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details))
 
 					if res.Vulnerable {
 						vulnerableCount++
@@ -407,33 +402,8 @@ func main() {
 					crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
 				}
 
-				crashStatus.SetText("Скан завершен! Выберите куда сохранить файл")
-				appendLog(crashLog, "[SYSTEM] Проверка окончена. Вызов системного окна сохранения результатов...")
-
-				defaultReportName := fmt.Sprintf("scanned.txt")
-
-				// Вызывать UI компоненты (диалоги) в Fyne нужно строго в основном потоке, используем fyne.DoQueue
-				myApp.Driver().RunOnMain(func() {
-					saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-						if err != nil || outFile == nil {
-							appendLog(crashLog, "[WARN] Сохранение отчета отменено пользователем.")
-							return
-						}
-						defer outFile.Close()
-
-						// Собираем весь текст отчета из памяти и пишем в файл
-						fullReportText := strings.Join(reportLines, "")
-						_, writeErr := outFile.Write([]byte(fullReportText))
-						if writeErr != nil {
-							appendLog(crashLog, "[ERROR] Не удалось записать файл: " + writeErr.Error())
-						} else {
-							appendLog(crashLog, "[SYSTEM] Отчет успешно сохранен на устройство!")
-						}
-					}, myWindow)
-					
-					saveDialog.SetFileName(defaultReportName)
-					saveDialog.Show()
-				})
+				crashStatus.SetText("P2P Скан завершен!")
+				appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств намеряно: %d. Все результаты выведены выше.", vulnerableCount))
 
 			}(cleanText)
 
@@ -480,7 +450,6 @@ func main() {
 			saveCloudDialog.Show()
 		}
 	})
-
 
 cloudForm := widget.NewForm(
 widget.NewFormItem("Префикс (10 симв.):", prefixEntry),
