@@ -313,13 +313,8 @@ func main() {
 	})
 
 	// Запуск Облачного Сканирования с сохранением в txt
-	btnStartCloudScan := widget.NewButton("Запустить Облачный Скан", func() {
+	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
 		prefix := strings.TrimSpace(prefixEntry.Text)
-		if len(prefix) != 10 {
-			crashStatus.SetText("Ошибка: префикс должен содержать 10 символов!")
-			return
-		}
-
 		if selectedCloudFile == nil {
 			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
 			return
@@ -335,52 +330,137 @@ func main() {
 			rps = 100
 		}
 
-// Читаем данные из входного файла перед запуском сканера
-defer selectedCloudFile.Close()
-fileData, err := io.ReadAll(selectedCloudFile)
-if err != nil {
-crashStatus.SetText("Не удалось прочитать исходный файл: " + err.Error())
-return
-}
-_ = fileData // Переменная fileData содержит сырые байты файла для вашей внутренней логики
-// Сначала просим пользователя указать файл для сохранения реальных серийных номеров
-timestamp := time.Now().Format("20060102_150405")
-defaultCloudFile := fmt.Sprintf("cloud_found_%s_%s.txt", prefix, timestamp)
-saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-if err != nil {
-crashStatus.SetText("Ошибка создания файла: " + err.Error())
-return
-}
-if outFile == nil {
-crashStatus.SetText("Сканирование отменено (не выбран файл)")
-return
-}
-crashStatus.SetText("Сканирование запущено...")
-crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация ScanCloudPrefix...\n")
-// Запускаем сам скан в фоновом потоке
-go func(out io.WriteCloser) {
-defer out.Close()
-ctx := context.Background()
-stats, err := ScanCloudPrefix(ctx, prefix, workers, rps, func(realSerial string) {
-// 1. Отображаем реальный найденный серийник в GUI логе
-appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
-// 2. Сразу записываем реальный серийный номер в txt файл на диск
-lineData := fmt.Sprintf("%s\n", realSerial)
-_, _ = out.Write([]byte(lineData))
-})
-if err != nil {
-crashStatus.SetText("Ошибка запуска сканера!")
-appendLog(crashLog, "[ERROR] Прервано: " + err.Error())
-return
-}
-// Вывод результатов по окончании
-crashStatus.SetText("Готово!")
-appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
-}(outFile)
-}, myWindow)
-saveCloudDialog.SetFileName(defaultCloudFile)
-saveCloudDialog.Show()
-})
+		// Читаем данные из входного файла перед запуском сканера
+		defer selectedCloudFile.Close()
+		fileData, err := io.ReadAll(selectedCloudFile)
+		if err != nil {
+			crashStatus.SetText("Не удалось прочитать исходный файл: " + err.Error())
+			return
+		}
+
+		// Анализируем содержимое файла, чтобы понять: там префиксы или готовые серийники
+		cleanText := strings.ReplaceAll(string(fileData), "\r", "")
+		lines := strings.Split(cleanText, "\n")
+		
+		var sampleSerial string
+		var totalValidLines int
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				totalValidLines++
+				if sampleSerial == "" {
+					sampleSerial = line // Запоминаем первую валидную строку для теста
+				}
+			}
+		}
+
+		if totalValidLines == 0 {
+			crashStatus.SetText("Ошибка: Выбранный файл пуст!")
+			return
+		}
+
+		// === ИНТЕЛЛЕКТУАЛЬНАЯ ПРОВЕРКА СОДЕРЖИМОГО ФАЙЛА ===
+		// Если первая строка длиннее 12 символов, скорее всего это готовые серийники (например, 8L01234PAZXXXXX)
+		isFileWithSerials := len(sampleSerial) >= 14
+
+		if isFileWithSerials {
+			// ----------------─────────────────────────────────────────
+			// ВЕТКА А: В ФАЙЛЕ СЕРИЙНИКИ -> ЗАПУСКАЕМ МОДУЛЬ P2P-ЭКСПЛОЙТА
+			// ----------------─────────────────────────────────────────
+			crashStatus.SetText("Обнаружены серийники! Запуск P2P модуля...")
+			crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Инициализация воркеров...\n")
+
+			// Таймаут для P2P операций
+			connTimeout := 6 * time.Second
+			moduleChan := make(chan P2PScanResult, 100)
+
+			// Запуск модуля P2P-сканирования в фоновом потоке
+			go func(fileContent string) {
+				// Передаем строку как io.Reader через strings.NewReader
+				reader := strings.NewReader(fileContent)
+				ctx := context.Background()
+				
+				err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
+				if err != nil {
+					crashStatus.SetText("Ошибка P2P модуля!")
+					appendLog(crashLog, "[ERROR] Прервано: " + err.Error())
+					return
+				}
+
+				logFile, _ := os.OpenFile("p2p_scan_report.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+				if logFile != nil {
+					defer logFile.Close()
+				}
+
+				vulnerableCount := 0
+				var currentIdx int64 = 0
+
+				for res := range moduleChan {
+					atomic.AddInt64(&currentIdx, 1)
+					statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
+					
+					appendLog(crashLog, statusText)
+
+					if logFile != nil {
+						_, _ = logFile.WriteString(fmt.Sprintf("%s %s\n", time.Now().Format("2006-01-02 15:04:05"), statusText))
+					}
+
+					if res.Vulnerable {
+						vulnerableCount++
+					}
+
+					crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
+				}
+
+				crashStatus.SetText("P2P Скан завершен!")
+				appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств: %d. Отчет: p2p_scan_report.log", vulnerableCount))
+
+			}(cleanText)
+
+		} else {
+			// ----------------─────────────────────────────────────────
+			// ВЕТКА Б: В ФАЙЛЕ ПРЕФИКСЫ -> СТАНДАРТНЫЙ СКАН ОБЛАКА DAHUA
+			// ------------------------------------------------─────────
+			if len(prefix) != 10 {
+				crashStatus.SetText("Ошибка: Для скана облака префикс в поле должен быть 10 символов!")
+				return
+			}
+
+			timestamp := time.Now().Format("20060102_150405")
+			defaultCloudFile := fmt.Sprintf("cloud_found_%s_%s.txt", prefix, timestamp)
+			
+			saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+				if err != nil || outFile == nil {
+					crashStatus.SetText("Сканирование отменено")
+					return
+				}
+				crashStatus.SetText("Сканирование облака запущено...")
+				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация ScanCloudPrefix...\n")
+
+				go func(out io.WriteCloser) {
+					defer out.Close()
+					ctx := context.Background()
+					
+					stats, err := ScanCloudPrefix(ctx, prefix, workers, rps, func(realSerial string) {
+						appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
+						_, _ = out.Write([]byte(realSerial + "\n"))
+					})
+					
+					if err != nil {
+						crashStatus.SetText("Ошибка запуска сканера!")
+						appendLog(crashLog, "[ERROR] Прервано: " + err.Error())
+						return
+					}
+					
+					crashStatus.SetText("Готово!")
+					appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
+				}(outFile)
+			}, myWindow)
+			
+			saveCloudDialog.SetFileName(defaultCloudFile)
+			saveCloudDialog.Show()
+		}
+	})
 cloudForm := widget.NewForm(
 widget.NewFormItem("Префикс (10 симв.):", prefixEntry),
 widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
