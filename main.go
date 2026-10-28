@@ -312,7 +312,6 @@ func main() {
 		fileDialog.Show()
 	})
 
-	// Запуск Облачного Сканирования с сохранением в txt
 	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
 		prefix := strings.TrimSpace(prefixEntry.Text)
 		if selectedCloudFile == nil {
@@ -360,13 +359,12 @@ func main() {
 		}
 
 		// === ИНТЕЛЛЕКТУАЛЬНАЯ ПРОВЕРКА СОДЕРЖИМОГО ФАЙЛА ===
-		// Если первая строка длиннее 12 символов, скорее всего это готовые серийники (например, 8L01234PAZXXXXX)
-		isFileWithSerials := len(sampleSerial) >= 14
+		isFileWithSerials := len(sampleSerial) >= 13
 
 		if isFileWithSerials {
-			// ----------------─────────────────────────────────────────
+			// ------------------------------------------------─────────
 			// ВЕТКА А: В ФАЙЛЕ СЕРИЙНИКИ -> ЗАПУСКАЕМ МОДУЛЬ P2P-ЭКСПЛОЙТА
-			// ----------------─────────────────────────────────────────
+			// ------------------------------------------------─────────
 			crashStatus.SetText("Обнаружены серийники! Запуск P2P модуля...")
 			crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Инициализация воркеров...\n")
 
@@ -376,7 +374,6 @@ func main() {
 
 			// Запуск модуля P2P-сканирования в фоновом потоке
 			go func(fileContent string) {
-				// Передаем строку как io.Reader через strings.NewReader
 				reader := strings.NewReader(fileContent)
 				ctx := context.Background()
 				
@@ -387,23 +384,16 @@ func main() {
 					return
 				}
 
-				logFile, _ := os.OpenFile("p2p_scan_report.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-				if logFile != nil {
-					defer logFile.Close()
-				}
-
 				vulnerableCount := 0
 				var currentIdx int64 = 0
 
+				// Читаем результаты из канала модуля в реальном времени
 				for res := range moduleChan {
 					atomic.AddInt64(&currentIdx, 1)
 					statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
 					
+					// Мгновенно выводим в лог на экране смартфона
 					appendLog(crashLog, statusText)
-
-					if logFile != nil {
-						_, _ = logFile.WriteString(fmt.Sprintf("%s %s\n", time.Now().Format("2006-01-02 15:04:05"), statusText))
-					}
 
 					if res.Vulnerable {
 						vulnerableCount++
@@ -413,12 +403,12 @@ func main() {
 				}
 
 				crashStatus.SetText("P2P Скан завершен!")
-				appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств: %d. Отчет: p2p_scan_report.log", vulnerableCount))
+				appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств намеряно: %d. Все результаты выведены выше.", vulnerableCount))
 
 			}(cleanText)
 
 		} else {
-			// ----------------─────────────────────────────────────────
+			// ------------------------------------------------─────────
 			// ВЕТКА Б: В ФАЙЛЕ ПРЕФИКСЫ -> СТАНДАРТНЫЙ СКАН ОБЛАКА DAHUA
 			// ------------------------------------------------─────────
 			if len(prefix) != 10 {
@@ -461,6 +451,7 @@ func main() {
 			saveCloudDialog.Show()
 		}
 	})
+
 cloudForm := widget.NewForm(
 widget.NewFormItem("Префикс (10 симв.):", prefixEntry),
 widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
