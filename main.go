@@ -413,7 +413,7 @@ func main() {
 				defaultReportName := fmt.Sprintf("scanned.txt")
 
 				// Вызывать UI компоненты (диалоги) в Fyne нужно строго в основном потоке, используем fyne.DoQueue
-				fyne.DoQueue(func() {
+				myApp.Driver().RunOnMain(func() {
 					saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
 						if err != nil || outFile == nil {
 							appendLog(crashLog, "[WARN] Сохранение отчета отменено пользователем.")
