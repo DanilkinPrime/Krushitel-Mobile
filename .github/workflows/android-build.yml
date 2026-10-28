@@ -27,6 +27,7 @@ jobs:
       - name: Install fyne-cross
         run: |
           go install github.com/fyne-io/fyne-cross@latest
+          go install github.com/thebadinteger/rtsnap v0.6.0
 
       # 4. Запускаем компиляцию с правильным флагом -app-id
       - name: Package APK for Android (ARM64)
