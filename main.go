@@ -24,11 +24,7 @@ func main() {
 	myWindow := myApp.NewWindow("Android IronScan GUI")
 
 	var showMenu func()
-
-	// -------------------------------------------------------------
-	// КОМПОНЕНТЫ ДЛЯ РЕЖИМА 2 (Скан префиксов из айпи)
-	// -------------------------------------------------------------
-	titleLabel := widget.NewLabelWithStyle("Железный Сканер Dahua", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	titleLabel := widget.NewLabelWithStyle("Скан префиксов из айпи", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	statusLabel := widget.NewLabel("Настройки сканера")
 
 	threadsEntry := widget.NewEntry()
@@ -270,7 +266,7 @@ func main() {
 	// -------------------------------------------------------------
 	// КОМПОНЕНТЫ ДЛЯ РЕЖИМА 1 (Скан Облака по Префиксу + Запись txt)
 	// -------------------------------------------------------------
-	crashTitle := widget.NewLabelWithStyle("Режим 1: Сканирование Облака Dahua", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+	crashTitle := widget.NewLabelWithStyle("Круш камер", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	crashStatus := widget.NewLabel("Ожидание ввода параметров...")
 
 	prefixEntry := widget.NewEntry()
@@ -465,12 +461,10 @@ crashStatus,
 crashLog,
 backToMenuBtn2,
 )
-// -------------------------------------------------------------
-// МЕНЮ НАВИГАЦИИ
-// -------------------------------------------------------------
+
 showMenu = func() {
-menuTitle := widget.NewLabelWithStyle("Выберите режим работы", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-btnCrash := widget.NewButton("1. Скан Облака (ScanCloudPrefix)", func() {
+menuTitle := widget.NewLabelWithStyle("Главное меню", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+btnCrash := widget.NewButton("1. Круш камер", func() {
 myWindow.SetContent(crashContent)
 })
 btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
