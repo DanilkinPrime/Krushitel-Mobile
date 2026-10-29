@@ -478,26 +478,36 @@ backToMenuBtn2,
 )
 
 showMenu = func() {
-menuTitle := widget.NewLabelWithStyle("Главное меню", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
-btnCrash := widget.NewButton("1. Круш камер", func() {
-myWindow.SetContent(crashContent)
-})
-btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
-myWindow.SetContent(scanContent)
-})
-menuLayout := container.NewVBox(
-menuTitle,
-layout.NewSpacer(),
-btnCrash,
-btnScan,
-layout.NewSpacer(),
-)
-myWindow.SetContent(menuLayout)
+	menuTitle := widget.NewLabelWithStyle(
+		"Главное меню",
+		fyne.TextAlignCenter,
+		fyne.TextStyle{Bold: true},
+	)
+
+	btnCrash := widget.NewButton("1. Круш камер", func() {
+		myWindow.SetContent(crashContent)
+	})
+
+	btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
+		myWindow.SetContent(scanContent)
+	})
+
+	menuLayout := container.NewVBox(
+		menuTitle,
+		layout.NewSpacer(),
+		btnCrash,
+		btnScan,
+		layout.NewSpacer(),
+	)
+
+	myWindow.SetContent(menuLayout)
 }
+
 showMenu()
 myWindow.Resize(fyne.NewSize(450, 550))
 myWindow.ShowAndRun()
 }
+
 func appendLog(entry *widget.Entry, text string) {
 	current := entry.Text
 	if current == "" {
@@ -505,6 +515,5 @@ func appendLog(entry *widget.Entry, text string) {
 	} else {
 		entry.SetText(current + "\n" + text)
 	}
-	// Автоматически скроллит текстовое поле вниз к новым логам
-	entry.ScrollToBottom() 
+	entry.ScrollToBottom()
 }
