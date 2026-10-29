@@ -274,10 +274,6 @@ func main() {
 	crashTitle := widget.NewLabelWithStyle("Круш камер", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	crashStatus := widget.NewLabel("Ожидание ввода параметров...")
 
-	prefixEntry := widget.NewEntry()
-	prefixEntry.SetText("PAG1AA")
-	prefixEntry.SetPlaceHolder("Впишите 10 символов префикса")
-
 	cloudWorkersEntry := widget.NewEntry()
 	cloudWorkersEntry.SetText("200")
 	cloudWorkersEntry.SetPlaceHolder("Потоки (UDP сокеты)")
@@ -314,7 +310,6 @@ func main() {
 	})
 
 	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
-		prefix := strings.TrimSpace(prefixEntry.Text)
 		if selectedCloudFile == nil {
 			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
 			return
@@ -464,7 +459,6 @@ if isFileWithSerials {
 })
 	
 cloudForm := widget.NewForm(
-widget.NewFormItem("Префикс (10 симв.):", prefixEntry),
 widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
 widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
 widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
