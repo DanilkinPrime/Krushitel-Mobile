@@ -263,7 +263,7 @@ func main() {
 	scanContent := container.NewVBox(
 		titleLabel,
 		settingsForm,
-		btnStartIPScan, // Кнопка запуска теперь идет после формы
+		btnStartIPScan,
 		statusLabel,
 		logContent,
 		backToMenuBtn1,
@@ -499,10 +499,12 @@ myWindow.Resize(fyne.NewSize(450, 550))
 myWindow.ShowAndRun()
 }
 func appendLog(entry *widget.Entry, text string) {
-current := entry.Text
-if current == "" {
-entry.SetText(text)
-} else {
-entry.SetText(current + "\n" + text)
-}
+	current := entry.Text
+	if current == "" {
+		entry.SetText(text)
+	} else {
+		entry.SetText(current + "\n" + text)
+	}
+	// Автоматически скроллит текстовое поле вниз к новым логам
+	entry.ScrollToBottom() 
 }
