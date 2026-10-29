@@ -510,5 +510,4 @@ func appendLog(entry *widget.Entry, text string) {
 	} else {
 		entry.SetText(current + "\n" + text)
 	}
-	entry.ScrollToBottom()
 }
