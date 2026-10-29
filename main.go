@@ -461,7 +461,8 @@ if isFileWithSerials {
     saveCloudDialog.SetFileName(defaultCloudFile)
     saveCloudDialog.Show()
 }
-
+})
+	
 cloudForm := widget.NewForm(
 widget.NewFormItem("Префикс (10 симв.):", prefixEntry),
 widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
