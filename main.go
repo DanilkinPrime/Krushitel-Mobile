@@ -19,8 +19,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// Глобальный LogHook теперь принимает готовую статистику
-var LogHook func(checked, success, total uint64)
 
 func main() {
 	myApp := app.New()
