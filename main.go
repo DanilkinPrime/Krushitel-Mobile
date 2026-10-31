@@ -192,16 +192,29 @@ func main() {
 					}
 
 					LogHook = func(format string, args ...any) {
-						msg := fmt.Sprintf(format, args...)
-						appendLog(logContent, "[CORE] "+msg)
-						atomic.AddUint64(&checkedCount, 1)
+    msg := fmt.Sprintf(format, args...)
+    appendLog(logContent, "[CORE] "+msg)
+    
+    // Сначала увеличиваем счетчик, затем считываем актуальное значение
+    currentChecked := atomic.AddUint64(&checkedCount, 1)
+    currentSuccess := atomic.LoadUint64(&successCount)
+    totalTargets := len(finalTargets)
 
-						statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)",
-							atomic.LoadUint64(&checkedCount),
-							len(finalTargets),
-							atomic.LoadUint64(&successCount),
-						))
-					}
+    // Расчет процента выполнения
+    var percentage float64
+    if totalTargets > 0 {
+        percentage = (float64(currentChecked) / float64(totalTargets)) * 100
+    }
+
+    // Вывод статуса с процентами (округление до 2 знаков после запятой)
+    statusLabel.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
+        percentage,
+        currentChecked,
+        totalTargets,
+        currentSuccess,
+    ))
+}
+
 
 					ctx := context.Background()
 
