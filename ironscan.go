@@ -617,6 +617,12 @@ func Run(ctx context.Context, opts Options, onResult func(Result)) error {
 				if ctx.Err() != nil {
 					continue
 				}
+				
+				// === ИСПРАВЛЕНИЕ: Вызываем LogHook для каждого проверенного IP ===
+				if LogHook != nil {
+					LogHook("Проверен адрес: %s", t)
+				}
+
 				mu.Lock()
 				onResult(r)
 				mu.Unlock()
