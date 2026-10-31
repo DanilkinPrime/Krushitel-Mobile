@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"sync/atomic"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -60,14 +60,15 @@ func main() {
 		}
 	})
 
-// ПЕРЕМЕННАЯ ДЛЯ ХРАНЕНИЯ ВЫБРАННОГО ФАЙЛА В РЕЖИМЕ IP-СКАНА
+	// ПЕРЕМЕННАЯ ДЛЯ ХРАНЕНИЯ ВЫБРАННОГО ФАЙЛА В РЕЖИМЕ IP-СКАНА
 	var selectedIPFile fyne.URIReadCloser
 
 	btnChooseIPFile := widget.NewButton("Выбрать файл с IP", func() {
 		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 			if err != nil {
 				statusLabel.SetText("Ошибка выбора файла: " + err.Error())
-				return }
+				return
+			}
 			if reader == nil {
 				statusLabel.SetText("Выбор файла отменен")
 				return
@@ -93,11 +94,11 @@ func main() {
 		go func(r fyne.URIReadCloser) {
 			defer r.Close()
 			appendLog(logContent, "[SYSTEM] Чтение сырых данных из файла...")
-			
+
 			data, err := io.ReadAll(r)
 			if err != nil {
 				statusLabel.SetText("Не удалось прочитать файл")
-				appendLog(logContent, "[ERROR] Ошибка io.ReadAll: " + err.Error())
+				appendLog(logContent, "[ERROR] Ошибка io.ReadAll: "+err.Error())
 				return
 			}
 			appendLog(logContent, fmt.Sprintf("[SYSTEM] Прочитано %d байт. Очистка строк от символов \\r...", len(data)))
@@ -173,97 +174,93 @@ func main() {
 			defaultFileName := fmt.Sprintf("%s_%s.txt", outNameBase, timestamp)
 
 			saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-    var checkedCount uint64 = 0
-    var successCount uint64 = 0 // 1. Изменили тип на uint64 для atomic
+				var checkedCount uint64 = 0
+				var successCount uint64 = 0
 
-    if err != nil {
-        statusLabel.SetText("Ошибка создания файла: " + err.Error())
-        return check
-    }
-    if outFile == nil {
-        statusLabel.SetText("Сохранение результатов отменено")
-        return
-    }
+				if err != nil {
+					statusLabel.SetText("Ошибка создания файла: " + err.Error())
+					return // ИСПРАВЛЕНО: убран случайный 'check'
+				}
+				if outFile == nil {
+					statusLabel.SetText("Сохранение результатов отменено")
+					return
+				}
 
-    appendLog(logContent, "[SYSTEM] Выходной файл подтвержден. Запуск сетевых воркеров...")
-    statusLabel.SetText(fmt.Sprintf("Сканирование %d целей...", len(finalTargets)))
+				appendLog(logContent, "[SYSTEM] Выходной файл подтвержден. Запуск сетевых воркеров...")
+				statusLabel.SetText(fmt.Sprintf("Сканирование %d целей...", len(finalTargets)))
 
-    go func(out fyne.URIWriteCloser) {
-        defer out.Close()
+				go func(out fyne.URIWriteCloser) {
+					defer out.Close()
 
-        opts := Options{
-            Targets:     finalTargets,
-            Port:        basePort,
-            Timeout:     2 * time.Second,
-            Concurrency: concurrency,
-            Retries:     1,
-            Seed:        0,
-        }
+					opts := Options{
+						Targets:     finalTargets,
+						Port:        basePort,
+						Timeout:     2 * time.Second,
+						Concurrency: concurrency,
+						Retries:     1,
+						Seed:        0,
+					}
 
-        LogHook = func(format string, args ...any) {
-            msg := fmt.Sprintf(format, args...)
-            appendLog(logContent, "[CORE] "+msg)
-            atomic.AddUint64(&checkedCount, 1)
-            
-            // 2. Безопасное чтение через atomic.LoadUint64
-            statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)", 
-                atomic.LoadUint64(&checkedCount), 
-                len(finalTargets), 
-                atomic.LoadUint64(&successCount),
-            ))
-        }
+					LogHook = func(format string, args ...any) {
+						msg := fmt.Sprintf(format, args...)
+						appendLog(logContent, "[CORE] "+msg)
+						atomic.AddUint64(&checkedCount, 1)
 
-        ctx := context.Background()
-        // Убрали строку successCount = 0, она уже инициализирована выше
+						statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)",
+							atomic.LoadUint64(&checkedCount),
+							len(finalTargets),
+							atomic.LoadUint64(&successCount),
+						))
+					}
 
-        scanErr := Run(ctx, opts, func(res Result) {
-            if res.Ok() {
-                if len(allowedModels) > 0 {
-                    matched := false
-                    serialUpper := strings.ToUpper(res.Serial)
-                    for _, allowed := range allowedModels {
-                        if strings.Contains(serialUpper, allowed) {
-                            matched = true
-                            break
-                        }
-                    }
-                    if !matched {
-                        return
-                    }
-                }
+					ctx := context.Background()
 
-                finalSerial := res.Serial
-                if ruleEntry.Text == "Нет" {
-                    if len(finalSerial) > 10 {
-                        finalSerial = finalSerial[:10]
-                    }
-                }
+					scanErr := Run(ctx, opts, func(res Result) {
+						if res.Ok() {
+							if len(allowedModels) > 0 {
+								matched := false
+								serialUpper := strings.ToUpper(res.Serial)
+								for _, allowed := range allowedModels {
+									if strings.Contains(serialUpper, allowed) {
+										matched = true
+										break
+									}
+								}
+								if !matched {
+									return
+								}
+							}
 
-                // 3. Безопасный инкремент через Атомик
-                currentSuccess := atomic.AddUint64(&successCount, 1)
+							finalSerial := res.Serial
+							if ruleEntry.Text == "Нет" {
+								if len(finalSerial) > 10 {
+									finalSerial = finalSerial[:10]
+								}
+							}
 
-                foundMsg := fmt.Sprintf("[FOUND] %s -> %s (%s)", res.Target, finalSerial, res.Model)
-                appendLog(logContent, foundMsg)
+							// ИСПРАВЛЕНО: вызываем атомик напрямую, не создавая неиспользуемую переменную
+							atomic.AddUint64(&successCount, 1)
 
-                lineData := fmt.Sprintf("%s\n", finalSerial)
-                if _, writeErr := out.Write([]byte(lineData)); writeErr != nil {
-                    appendLog(logContent, "[ERROR] Ошибка записи на диск: "+writeErr.Error())
-                }
-            }
-        })
+							foundMsg := fmt.Sprintf("[FOUND] %s -> %s (%s)", res.Target, finalSerial, res.Model)
+							appendLog(logContent, foundMsg)
 
-        if scanErr != nil {
-            statusLabel.SetText("Ошибка работы: " + scanErr.Error())
-            appendLog(logContent, "[ERROR] Сканер аварийно завершился: " + scanErr.Error())
-        } else {
-            // 4. Безопасное чтение для финального статуса
-            finalSuccess := atomic.LoadUint64(&successCount)
-            statusLabel.SetText(fmt.Sprintf("Успешно! Найдено устройств: %d", finalSuccess))
-            appendLog(logContent, fmt.Sprintf("[SYSTEM] Сканирование полностью завершено. Успешных находок: %d", finalSuccess))
-        }
-    }(outFile)
-}, myWindow)
+							lineData := fmt.Sprintf("%s\n", finalSerial)
+							if _, writeErr := out.Write([]byte(lineData)); writeErr != nil {
+								appendLog(logContent, "[ERROR] Ошибка записи на диск: "+writeErr.Error())
+							}
+						}
+					})
 
+					if scanErr != nil {
+						statusLabel.SetText("Ошибка работы: " + scanErr.Error())
+						appendLog(logContent, "[ERROR] Сканер аварийно завершился: "+scanErr.Error())
+					} else {
+						finalSuccess := atomic.LoadUint64(&successCount)
+						statusLabel.SetText(fmt.Sprintf("Успешно! Найдено устройств: %d", finalSuccess))
+						appendLog(logContent, fmt.Sprintf("[SYSTEM] Сканирование полностью завершено. Успешных находок: %d", finalSuccess))
+					}
+				}(outFile)
+			}, myWindow)
 
 			saveDialog.SetFileName(defaultFileName)
 			saveDialog.Show()
@@ -356,7 +353,7 @@ func main() {
 		// Анализируем содержимое файла, чтобы понять: там префиксы или готовые серийники
 		cleanText := strings.ReplaceAll(string(fileData), "\r", "")
 		lines := strings.Split(cleanText, "\n")
-		
+
 		var sampleSerial string
 		var totalValidLines int
 		for _, line := range lines {
@@ -375,152 +372,152 @@ func main() {
 		}
 
 		// === ИНТЕЛЛЕКТУАЛЬНАЯ ПРОВЕРКА СОДЕРЖИМОГО ФАЙЛА ===
-isFileWithSerials := len(sampleSerial) >= 13
+		isFileWithSerials := len(sampleSerial) >= 13
 
-if isFileWithSerials {
-    // ------------------------------------------------─────────
-    // ВЕТКА А: В ФАЙЛЕ СЕРИЙНИКИ -> ЗАПУСКАЕМ МОДУЛЬ P2P-ЭКСПЛОЙТА + СОХРАНЕНИЕ
-    // ------------------------------------------------─────────
-    defaultP2PFile := fmt.Sprintf("p2p_results_%s.txt", time.Now().Format("20060102_150405"))
-    
-    saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-        if err != nil || outFile == nil {
-            crashStatus.SetText("Сохранение отменено")
-            return
-        }
-        
-        crashStatus.SetText("Обнаружены серийники! Запуск P2P модуля...")
-        crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
-        
-        connTimeout := 6 * time.Second
-        moduleChan := make(chan P2PScanResult, 100)
-        
-        // Запуск модуля P2P-сканирования в фоновом потоке
-        go func(fileContent string, out io.WriteCloser) {
-            defer out.Close()
-            
-            reader := strings.NewReader(fileContent)
-            ctx := context.Background()
-            
-            err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
-            if err != nil {
-                crashStatus.SetText("Ошибка P2P модуля!")
-                appendLog(crashLog, "[ERROR] Прервано: " + err.Error())
-                return
-            }
-            
-            vulnerableCount := 0
-            var currentIdx int64 = 0
-            
-            // Читаем результаты из канала модуля в реальном времени
-            for res := range moduleChan {
-                atomic.AddInt64(&currentIdx, 1)
-                
-                statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
-                appendLog(crashLog, statusText)
-                
-                // Фильтруем и записываем ТОЛЬКО уязвимые (или все, если убрать if res.Vulnerable)
-                if res.Vulnerable {
-                    vulnerableCount++
-                    // Форматируем строку для сохранения на диск
-                    saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
-                    _, _ = out.Write([]byte(saveLine))
-                }
-                
-                crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
-            }
-            
-            crashStatus.SetText("P2P Скан завершен!")
-            appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
-        }(cleanText, outFile)
-        
-    }, myWindow)
-    
-    saveP2PDialog.SetFileName(defaultP2PFile)
-    saveP2PDialog.Show()
+		if isFileWithSerials {
+			// ------------------------------------------------─────────
+			// ВЕТКА А: В ФАЙЛЕ СЕРИЙНИКИ -> ЗАПУСКАЕМ МОДУЛЬ P2P-ЭКСПЛОЙТА + СОХРАНЕНИЕ
+			// ------------------------------------------------─────────
+			defaultP2PFile := fmt.Sprintf("p2p_results_%s.txt", time.Now().Format("20060102_150405"))
 
-} else {
-    // ------------------------------------------------─────────
-    // ВЕТКА Б: В ФАЙЛЕ ПРЕФИКСЫ -> СТАНДАРТНЫЙ СКАН ОБЛАКА DAHUA
-    // ------------------------------------------------─────────
-    if len(sampleSerial) != 10 {
-        crashStatus.SetText("Ошибка: Для скана облака префикс в поле должен быть 10 символов!")
-        return
-    }
-    defaultCloudFile := fmt.Sprintf("serials_%s.txt", time.Now().Format("20060102_150405"))
-    saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-        if err != nil || outFile == nil {
-            crashStatus.SetText("Сканирование отменено")
-            return
-        }
-        crashStatus.SetText("Сканирование облака запущено...")
-        crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация ScanCloudPrefix...\n")
-        
-        go func(out io.WriteCloser) {
-            defer out.Close()
-            ctx := context.Background()
-            stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
-                appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
-                _, _ = out.Write([]byte(realSerial + "\n"))
-            })
-            if err != nil {
-                crashStatus.SetText("Ошибка запуска сканера!")
-                appendLog(crashLog, "[ERROR] Прервано: " + err.Error())
-                return
-            }
-            crashStatus.SetText("Готово!")
-            appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
-        }(outFile)
-    }, myWindow)
-    
-    saveCloudDialog.SetFileName(defaultCloudFile)
-    saveCloudDialog.Show()
-}
-})
-	
-cloudForm := widget.NewForm(
-widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
-widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
-widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
-)
-crashContent := container.NewVBox(
-crashTitle,
-cloudForm,
-btnStartCloudScan,
-crashStatus,
-crashLog,
-backToMenuBtn2,
-)
+			saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+				if err != nil || outFile == nil {
+					crashStatus.SetText("Сохранение отменено")
+					return
+				}
 
-showMenu = func() {
-	menuTitle := widget.NewLabelWithStyle(
-		"Главное меню",
-		fyne.TextAlignCenter,
-		fyne.TextStyle{Bold: true},
-	)
+				crashStatus.SetText("Обнаружены серийники! Запуск P2P модуля...")
+				crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
 
-	btnCrash := widget.NewButton("1. Круш камер", func() {
-		myWindow.SetContent(crashContent)
+				connTimeout := 6 * time.Second
+				moduleChan := make(chan P2PScanResult, 100)
+
+				// Запуск модуля P2P-сканирования в фоновом потоке
+				go func(fileContent string, out io.WriteCloser) {
+					defer out.Close()
+
+					reader := strings.NewReader(fileContent)
+					ctx := context.Background()
+
+					err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
+					if err != nil {
+						crashStatus.SetText("Ошибка P2P модуля!")
+						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
+						return
+					}
+
+					vulnerableCount := 0
+					var currentIdx int64 = 0
+
+					// Читаем результаты из канала модуля в реальном времени
+					for res := range moduleChan {
+						atomic.AddInt64(&currentIdx, 1)
+
+						statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
+						appendLog(crashLog, statusText)
+
+						// Фильтруем и записываем ТОЛЬКО уязвимые (или все, если убрать if res.Vulnerable)
+						if res.Vulnerable {
+							vulnerableCount++
+							// Форматируем строку для сохранения на диск
+							saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
+							_, _ = out.Write([]byte(saveLine))
+						}
+
+						crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
+					}
+
+					crashStatus.SetText("P2P Скан завершен!")
+					appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
+				}(cleanText, outFile)
+
+			}, myWindow)
+
+			saveP2PDialog.SetFileName(defaultP2PFile)
+			saveP2PDialog.Show()
+
+		} else {
+			// ------------------------------------------------─────────
+			// ВЕТКА Б: В ФАЙЛЕ ПРЕФИКСЫ -> СТАНДАРТНЫЙ СКАН ОБЛАКА DAHUA
+			// ------------------------------------------------─────────
+			if len(sampleSerial) != 10 {
+				crashStatus.SetText("Ошибка: Для скана облака префикс в поле должен быть 10 символов!")
+				return
+			}
+			defaultCloudFile := fmt.Sprintf("serials_%s.txt", time.Now().Format("20060102_150405"))
+			saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+				if err != nil || outFile == nil {
+					crashStatus.SetText("Сканирование отменено")
+					return
+				}
+				crashStatus.SetText("Сканирование облака запущено...")
+				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация ScanCloudPrefix...\n")
+
+				go func(out io.WriteCloser) {
+					defer out.Close()
+					ctx := context.Background()
+					stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
+						appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
+						_, _ = out.Write([]byte(realSerial + "\n"))
+					})
+					if err != nil {
+						crashStatus.SetText("Ошибка запуска сканера!")
+						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
+						return
+					}
+					crashStatus.SetText("Готово!")
+					appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
+				}(outFile)
+			}, myWindow)
+
+			saveCloudDialog.SetFileName(defaultCloudFile)
+			saveCloudDialog.Show()
+		}
 	})
 
-	btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
-		myWindow.SetContent(scanContent)
-	})
-
-	menuLayout := container.NewVBox(
-		menuTitle,
-		layout.NewSpacer(),
-		btnCrash,
-		btnScan,
-		layout.NewSpacer(),
+	cloudForm := widget.NewForm(
+		widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
+		widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
+		widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
+	)
+	crashContent := container.NewVBox(
+		crashTitle,
+		cloudForm,
+		btnStartCloudScan,
+		crashStatus,
+		crashLog,
+		backToMenuBtn2,
 	)
 
-	myWindow.SetContent(menuLayout)
-}
+	showMenu = func() {
+		menuTitle := widget.NewLabelWithStyle(
+			"Главное меню",
+			fyne.TextAlignCenter,
+			fyne.TextStyle{Bold: true},
+		)
 
-showMenu()
-myWindow.Resize(fyne.NewSize(450, 550))
-myWindow.ShowAndRun()
+		btnCrash := widget.NewButton("1. Круш камер", func() {
+			myWindow.SetContent(crashContent)
+		})
+
+		btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
+			myWindow.SetContent(scanContent)
+		})
+
+		menuLayout := container.NewVBox(
+			menuTitle,
+			layout.NewSpacer(),
+			btnCrash,
+			btnScan,
+			layout.NewSpacer(),
+		)
+
+		myWindow.SetContent(menuLayout)
+	}
+
+	showMenu()
+	myWindow.Resize(fyne.NewSize(450, 550))
+	myWindow.ShowAndRun()
 }
 
 func appendLog(entry *widget.Entry, text string) {
