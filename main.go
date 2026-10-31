@@ -35,10 +35,6 @@ func main() {
 	portEntry.SetText("37777")
 	portEntry.SetPlaceHolder("Один порт (например: 37777, 8000)")
 
-	outputEntry := widget.NewEntry()
-	outputEntry.SetText("serials")
-	outputEntry.SetPlaceHolder("Имя любого файла")
-
 	filterEntry := widget.NewEntry()
 	filterEntry.SetText("PAG, PAZ, PAJ")
 	filterEntry.SetPlaceHolder("Пусто = все")
@@ -118,11 +114,6 @@ func main() {
 				portEntry.SetText("37777")
 			}
 
-			outNameBase := strings.TrimSpace(outputEntry.Text)
-			if outNameBase == "" {
-				outNameBase = "serials"
-			}
-
 			var allowedModels []string
 			filterText := strings.TrimSpace(filterEntry.Text)
 			if filterText != "" {
@@ -170,8 +161,7 @@ func main() {
 				return
 			}
 
-			timestamp := time.Now().Format("20060102_150405")
-			defaultFileName := fmt.Sprintf("%s_%s.txt", outNameBase, timestamp)
+			defaultFileName := fmt.Sprintf("Prefixes.txt")
 
 			saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
 				var checkedCount uint64 = 0
@@ -272,7 +262,6 @@ func main() {
 		widget.NewFormItem("Исходный файл с IP:", btnChooseIPFile),
 		widget.NewFormItem("Потоки (Threads):", threadsEntry),
 		widget.NewFormItem("Порт по умолчанию:", portEntry),
-		widget.NewFormItem("Имя файла результатов:", outputEntry),
 		widget.NewFormItem("Фильтр префиксов:", filterEntry),
 		widget.NewFormItem("Добавлять серийники?:", ruleEntry),
 	)
@@ -285,9 +274,6 @@ func main() {
 		logContent,
 		backToMenuBtn1,
 	)
-	// -------------------------------------------------------------
-	// КОМПОНЕНТЫ ДЛЯ РЕЖИМА 1 (Скан Облака по Префиксу + Запись txt)
-	// -------------------------------------------------------------
 	crashTitle := widget.NewLabelWithStyle("Круш камер", fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 	crashStatus := widget.NewLabel("Ожидание ввода параметров...")
 
@@ -375,10 +361,7 @@ func main() {
 		isFileWithSerials := len(sampleSerial) >= 13
 
 		if isFileWithSerials {
-			// ------------------------------------------------─────────
-			// ВЕТКА А: В ФАЙЛЕ СЕРИЙНИКИ -> ЗАПУСКАЕМ МОДУЛЬ P2P-ЭКСПЛОЙТА + СОХРАНЕНИЕ
-			// ------------------------------------------------─────────
-			defaultP2PFile := fmt.Sprintf("p2p_results_%s.txt", time.Now().Format("20060102_150405"))
+			defaultP2PFile := fmt.Sprintf("krushed.txt")
 
 			saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
 				if err != nil || outFile == nil {
@@ -386,13 +369,12 @@ func main() {
 					return
 				}
 
-				crashStatus.SetText("Обнаружены серийники! Запуск P2P модуля...")
+				crashStatus.SetText("Крушим камеры")
 				crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
 
 				connTimeout := 6 * time.Second
 				moduleChan := make(chan P2PScanResult, 100)
 
-				// Запуск модуля P2P-сканирования в фоновом потоке
 				go func(fileContent string, out io.WriteCloser) {
 					defer out.Close()
 
@@ -401,7 +383,7 @@ func main() {
 
 					err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
 					if err != nil {
-						crashStatus.SetText("Ошибка P2P модуля!")
+						crashStatus.SetText("Ошибка модуля!")
 						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
 						return
 					}
@@ -437,21 +419,18 @@ func main() {
 			saveP2PDialog.Show()
 
 		} else {
-			// ------------------------------------------------─────────
-			// ВЕТКА Б: В ФАЙЛЕ ПРЕФИКСЫ -> СТАНДАРТНЫЙ СКАН ОБЛАКА DAHUA
-			// ------------------------------------------------─────────
 			if len(sampleSerial) != 10 {
-				crashStatus.SetText("Ошибка: Для скана облака префикс в поле должен быть 10 символов!")
+				crashStatus.SetText("Ошибка: Для скана префикса должен быть 10 символов!")
 				return
 			}
-			defaultCloudFile := fmt.Sprintf("serials_%s.txt", time.Now().Format("20060102_150405"))
+			defaultCloudFile := fmt.Sprintf("serials.txt")
 			saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
 				if err != nil || outFile == nil {
 					crashStatus.SetText("Сканирование отменено")
 					return
 				}
-				crashStatus.SetText("Сканирование облака запущено...")
-				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация ScanCloudPrefix...\n")
+				crashStatus.SetText("Сканирование запущено...")
+				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
 
 				go func(out io.WriteCloser) {
 					defer out.Close()
