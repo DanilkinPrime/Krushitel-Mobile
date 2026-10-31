@@ -229,7 +229,7 @@ func main() {
 							successCount++
 							foundMsg := fmt.Sprintf("[FOUND] %s -> %s (%s)", res.Target, finalSerial, res.Model)
 							appendLog(logContent, foundMsg)
-							lineData := fmt.Sprintf("%s;%s;%s;%s\n", res.Target, finalSerial, res.Model, res.Firmware)
+							lineData := fmt.Sprintf("%s\n", finalSerial)
 							if _, writeErr := out.Write([]byte(lineData)); writeErr != nil {
 								appendLog(logContent, "[ERROR] Ошибка записи на диск: " + writeErr.Error())
 							}
