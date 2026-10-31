@@ -169,107 +169,106 @@ func main() {
 				return
 			}
 
-			    timestamp := time.Now().Format("20060102_150405")
-    defaultFileName := fmt.Sprintf("%s_%s.txt", outNameBase, timestamp)
+			timestamp := time.Now().Format("20060102_150405")
+			defaultFileName := fmt.Sprintf("%s_%s.txt", outNameBase, timestamp)
 
-    saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-        var checkedCount uint64 = 0
-        var successCount uint64 = 0 // Сделали атомарным счетчиком
+			saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+    var checkedCount uint64 = 0
+    var successCount uint64 = 0 // 1. Изменили тип на uint64 для atomic
 
-        if err != nil {
-            statusLabel.SetText("Ошибка создания файла: " + err.Error())
-            return 
+    if err != nil {
+        statusLabel.SetText("Ошибка создания файла: " + err.Error())
+        return check
+    }
+    if outFile == nil {
+        statusLabel.SetText("Сохранение результатов отменено")
+        return
+    }
+
+    appendLog(logContent, "[SYSTEM] Выходной файл подтвержден. Запуск сетевых воркеров...")
+    statusLabel.SetText(fmt.Sprintf("Сканирование %d целей...", len(finalTargets)))
+
+    go func(out fyne.URIWriteCloser) {
+        defer out.Close()
+
+        opts := Options{
+            Targets:     finalTargets,
+            Port:        basePort,
+            Timeout:     2 * time.Second,
+            Concurrency: concurrency,
+            Retries:     1,
+            Seed:        0,
         }
-        if outFile == nil {
-            statusLabel.SetText("Сохранение результатов отменено")
-            return 
+
+        LogHook = func(format string, args ...any) {
+            msg := fmt.Sprintf(format, args...)
+            appendLog(logContent, "[CORE] "+msg)
+            atomic.AddUint64(&checkedCount, 1)
+            
+            // 2. Безопасное чтение через atomic.LoadUint64
+            statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)", 
+                atomic.LoadUint64(&checkedCount), 
+                len(finalTargets), 
+                atomic.LoadUint64(&successCount),
+            ))
         }
 
-        appendLog(logContent, "[SYSTEM] Выходной файл подтвержден. Запуск сетевых воркеров...")
-        statusLabel.SetText(fmt.Sprintf("Сканирование %d целей...", len(finalTargets)))
+        ctx := context.Background()
+        // Убрали строку successCount = 0, она уже инициализирована выше
 
-        // Запуск внутренней горутины сканирования
-        go func(out fyne.URIWriteCloser) {
-            defer out.Close()
-            opts := Options{
-                Targets:     finalTargets,
-                Port:        basePort,
-                Timeout:     2 * time.Second,
-                Concurrency: concurrency,
-                Retries:     1,
-                Seed:        0,
-            }
-
-            LogHook = func(format string, args ...any) {
-                msg := fmt.Sprintf(format, args...)
-                appendLog(logContent, "[CORE] " + msg)
-                atomic.AddUint64(&checkedCount, 1)
-                statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)", 
-                    atomic.LoadUint64(&checkedCount), 
-                    len(finalTargets), 
-                    atomic.LoadUint64(&successCount),
-                ))
-            }
-
-            ctx := context.Background()
-            scanErr := Run(ctx, opts, func(res Result) {
-                if res.Ok() {
-                    if len(allowedModels) > 0 {
-                        matched := false
-                        modelUpper := strings.ToUpper(res.Model)
-                        serialUpper := strings.ToUpper(res.Serial)
-                        for _, allowed := range allowedModels {
-                            if strings.Contains(modelUpper, allowed) || strings.Contains(serialUpper, allowed) {
-                                matched = true
-                                break
-                            }
-                        }
-                        if !matched {
-                            return 
+        scanErr := Run(ctx, opts, func(res Result) {
+            if res.Ok() {
+                if len(allowedModels) > 0 {
+                    matched := false
+                    serialUpper := strings.ToUpper(res.Serial)
+                    for _, allowed := range allowedModels {
+                        if strings.Contains(serialUpper, allowed) {
+                            matched = true
+                            break
                         }
                     }
-
-                    finalSerial := res.Serial
-                    if ruleEntry.Text == "Нет" {
-                        if len(finalSerial) > 10 {
-                            finalSerial = finalSerial[:10]
-                        }
+                    if !matched {
+                        return
                     }
-
-                    currentSuccess := atomic.AddUint64(&successCount, 1)
-
-                    foundMsg := fmt.Sprintf("[FOUND] %s -> %s (%s)", res.Target, finalSerial, res.Model)
-                    appendLog(logContent, foundMsg)
-
-                    lineData := fmt.Sprintf("%s\n", finalSerial)
-                    if _, writeErr := out.Write([]byte(lineData)); writeErr != nil {
-                        appendLog(logContent, "[ERROR] Ошибка записи на диск: " + writeErr.Error())
-                    }
-
-                    statusLabel.SetText(fmt.Sprintf("Проверено: %d / %d (Найдено: %d)", 
-                        atomic.LoadUint64(&checkedCount), 
-                        len(finalTargets), 
-                        currentSuccess,
-                    ))
                 }
-            })
 
-            if scanErr != nil {
-                statusLabel.SetText("Ошибка работы: " + scanErr.Error())
-                appendLog(logContent, "[ERROR] Сканер аварийно завершился: " + scanErr.Error())
-            } else {
-                finalFound := atomic.LoadUint64(&successCount)
-                statusLabel.SetText(fmt.Sprintf("Успешно! Найдено устройств: %d", finalFound))
-                appendLog(logContent, fmt.Sprintf("[SYSTEM] Сканирование полностью завершено. Успешных находок: %d", finalFound))
+                finalSerial := res.Serial
+                if ruleEntry.Text == "Нет" {
+                    if len(finalSerial) > 10 {
+                        finalSerial = finalSerial[:10]
+                    }
+                }
+
+                // 3. Безопасный инкремент через Атомик
+                currentSuccess := atomic.AddUint64(&successCount, 1)
+
+                foundMsg := fmt.Sprintf("[FOUND] %s -> %s (%s)", res.Target, finalSerial, res.Model)
+                appendLog(logContent, foundMsg)
+
+                lineData := fmt.Sprintf("%s\n", finalSerial)
+                if _, writeErr := out.Write([]byte(lineData)); writeErr != nil {
+                    appendLog(logContent, "[ERROR] Ошибка записи на диск: "+writeErr.Error())
+                }
             }
-        }(outFile) // Конец внутренней горутины сканирования
+        })
 
-    }, myWindow) // Конец коллбэка и закрытие dialog.NewFileSave
+        if scanErr != nil {
+            statusLabel.SetText("Ошибка работы: " + scanErr.Error())
+            appendLog(logContent, "[ERROR] Сканер аварийно завершился: " + scanErr.Error())
+        } else {
+            // 4. Безопасное чтение для финального статуса
+            finalSuccess := atomic.LoadUint64(&successCount)
+            statusLabel.SetText(fmt.Sprintf("Успешно! Найдено устройств: %d", finalSuccess))
+            appendLog(logContent, fmt.Sprintf("[SYSTEM] Сканирование полностью завершено. Успешных находок: %d", finalSuccess))
+        }
+    }(outFile)
+}, myWindow)
 
-    saveDialog.SetFileName(defaultFileName)
-    saveDialog.Show()
-}(selectedIPFile)
 
+			saveDialog.SetFileName(defaultFileName)
+			saveDialog.Show()
+		}(selectedIPFile)
+	})
 
 	// Добавили кнопку выбора файла прямо в форму настроек
 	settingsForm := widget.NewForm(
