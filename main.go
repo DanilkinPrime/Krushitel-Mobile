@@ -19,6 +19,9 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// Глобальный LogHook теперь принимает готовую статистику
+var LogHook func(checked, success, total uint64)
+
 func main() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("Android IronScan GUI")
@@ -164,12 +167,11 @@ func main() {
 			defaultFileName := fmt.Sprintf("Prefixes.txt")
 
 			saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-				var checkedCount uint64 = 0
 				var successCount uint64 = 0
 
 				if err != nil {
 					statusLabel.SetText("Ошибка создания файла: " + err.Error())
-					return // ИСПРАВЛЕНО: убран случайный 'check'
+					return
 				}
 				if outFile == nil {
 					statusLabel.SetText("Сохранение результатов отменено")
@@ -191,30 +193,19 @@ func main() {
 						Seed:        0,
 					}
 
-					// Заменяем старый LogHook в main на этот:
-LogHook = func(checked, success, total uint64) {
-    var percentage float64
-    if total > 0 {
-        percentage = (float64(checked) / float64(total)) * 100
-    }
-
-    // Текст обновляется всего 1 раз в секунду — интерфейс будет летать!
-    statusLabel.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
-        percentage,
-        checked,
-        total,
-        success,
-    ))
-}
-    // Вывод статуса с процентами (округление до 2 знаков после запятой)
-    statusLabel.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
-        percentage,
-        currentChecked,
-        totalTargets,
-        currentSuccess,
-    ))
-}
-
+					// Инициализация LogHook для обработки тиков раз в 1 сек
+					LogHook = func(checked, success, total uint64) {
+						var percentage float64
+						if total > 0 {
+							percentage = (float64(checked) / float64(total)) * 100
+						}
+						statusLabel.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
+							percentage,
+							checked,
+							total,
+							success,
+						))
+					}
 
 					ctx := context.Background()
 
@@ -241,7 +232,6 @@ LogHook = func(checked, success, total uint64) {
 								}
 							}
 
-							// ИСПРАВЛЕНО: вызываем атомик напрямую, не создавая неиспользуемую переменную
 							atomic.AddUint64(&successCount, 1)
 
 							foundMsg := fmt.Sprintf("[FOUND] %s -> %s (%s)", res.Target, finalSerial, res.Model)
@@ -341,7 +331,6 @@ LogHook = func(checked, success, total uint64) {
 			rps = 100
 		}
 
-		// Читаем данные из входного файла перед запуском сканера
 		defer selectedCloudFile.Close()
 		fileData, err := io.ReadAll(selectedCloudFile)
 		if err != nil {
@@ -349,174 +338,140 @@ LogHook = func(checked, success, total uint64) {
 			return
 		}
 
-		// Анализируем содержимое файла, чтобы понять: там префиксы или готовые серийники
-		cleanText := strings.ReplaceAll(string(fileData), "\r", "")
-		lines := strings.Split(cleanText, "\n")
-
-		var sampleSerial string
-		var totalValidLines int
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				totalValidLines++
-				if sampleSerial == "" {
-					sampleSerial = line // Запоминаем первую валидную строку для теста
-				}
-			}
-		}
-
-		if totalValidLines == 0 {
-			crashStatus.SetText("Ошибка: Выбранный файл пуст!")
-			return
-		}
-
-		// === ИНТЕЛЛЕКТУАЛЬНАЯ ПРОВЕРКА СОДЕРЖИМОГО ФАЙЛА ===
-		isFileWithSerials := len(sampleSerial) >= 13
-
-		if isFileWithSerials {
-			defaultP2PFile := fmt.Sprintf("krushed.txt")
-
-			saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-				if err != nil || outFile == nil {
-					crashStatus.SetText("Сохранение отменено")
-					return
-				}
-
-				crashStatus.SetText("Крушим камеры")
-				crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
-
-				connTimeout := 6 * time.Second
-				moduleChan := make(chan P2PScanResult, 100)
-
-				go func(fileContent string, out io.WriteCloser) {
-					defer out.Close()
-
-					reader := strings.NewReader(fileContent)
-					ctx := context.Background()
-
-					err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
-					if err != nil {
-						crashStatus.SetText("Ошибка модуля!")
-						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
-						return
-					}
-
-					vulnerableCount := 0
-					var currentIdx int64 = 0
-
-					// Читаем результаты из канала модуля в реальном времени
-					for res := range moduleChan {
-						atomic.AddInt64(&currentIdx, 1)
-
-						statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
-						appendLog(crashLog, statusText)
-
-						// Фильтруем и записываем ТОЛЬКО уязвимые (или все, если убрать if res.Vulnerable)
-						if res.Vulnerable {
-							vulnerableCount++
-							// Форматируем строку для сохранения на диск
-							saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
-							_, _ = out.Write([]byte(saveLine))
-						}
-
-						crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
-					}
-
-					crashStatus.SetText("P2P Скан завершен!")
-					appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
-				}(cleanText, outFile)
-
-			}, myWindow)
-
-			saveP2PDialog.SetFileName(defaultP2PFile)
-			saveP2PDialog.Show()
-
-		} else {
-			if len(sampleSerial) != 10 {
-				crashStatus.SetText("Ошибка: Для скана префикса должен быть 10 символов!")
-				return
-			}
-			defaultCloudFile := fmt.Sprintf("serials.txt")
-			saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-				if err != nil || outFile == nil {
-					crashStatus.SetText("Сканирование отменено")
-					return
-				}
-				crashStatus.SetText("Сканирование запущено...")
-				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
-
-				go func(out io.WriteCloser) {
-					defer out.Close()
-					ctx := context.Background()
-					stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
-						appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
-						_, _ = out.Write([]byte(realSerial + "\n"))
-					})
-					if err != nil {
-						crashStatus.SetText("Ошибка запуска сканера!")
-						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
-						return
-					}
-					crashStatus.SetText("Готово!")
-					appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
-				}(outFile)
-			}, myWindow)
-
-			saveCloudDialog.SetFileName(defaultCloudFile)
-			saveCloudDialog.Show()
-		}
-	})
-
-	cloudForm := widget.NewForm(
-		widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
-		widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
-		widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
-	)
-	crashContent := container.NewVBox(
-		crashTitle,
-		cloudForm,
-		btnStartCloudScan,
-		crashStatus,
-		crashLog,
-		backToMenuBtn2,
-	)
-
-	showMenu = func() {
-		menuTitle := widget.NewLabelWithStyle(
-			"Главное меню",
-			fyne.TextAlignCenter,
-			fyne.TextStyle{Bold: true},
-		)
-
-		btnCrash := widget.NewButton("1. Круш камер", func() {
-			myWindow.SetContent(crashContent)
-		})
-
-		btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
-			myWindow.SetContent(scanContent)
-		})
-
-		menuLayout := container.NewVBox(
-			menuTitle,
-			layout.NewSpacer(),
-			btnCrash,
-			btnScan,
-			layout.NewSpacer(),
-		)
-
-		myWindow.SetContent(menuLayout)
-	}
-
-	showMenu()
-	myWindow.Resize(fyne.NewSize(450, 550))
-	myWindow.ShowAndRun()
+cleanText := strings.ReplaceAll(string(fileData), "\r", "")
+lines := strings.Split(cleanText, "\n")
+var sampleSerial string
+var totalValidLines int
+for _, line := range lines {
+line = strings.TrimSpace(line)
+if line != "" && !strings.HasPrefix(line, "#") {
+totalValidLines++
+if sampleSerial == "" {
+sampleSerial = line
 }
-
+}
+}
+if totalValidLines == 0 {
+crashStatus.SetText("Ошибка: Выбранный файл пуст!")
+return
+}
+isFileWithSerials := len(sampleSerial) >= 13
+if isFileWithSerials {
+defaultP2PFile := fmt.Sprintf("krushed.txt")
+saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+if err != nil || outFile == nil {
+crashStatus.SetText("Сохранение отменено")
+return
+}
+crashStatus.SetText("Крушим камеры")
+crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
+connTimeout := 6 * time.Second
+moduleChan := make(chan P2PScanResult, 100)
+go func(fileContent string, out io.WriteCloser) {
+defer out.Close()
+reader := strings.NewReader(fileContent)
+ctx := context.Background()
+err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
+if err != nil {
+crashStatus.SetText("Ошибка модуля!")
+appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
+return
+}
+vulnerableCount := 0
+var currentIdx int64 = 0
+for res := range moduleChan {
+atomic.AddInt64(&currentIdx, 1)
+statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
+appendLog(crashLog, statusText)
+if res.Vulnerable {
+vulnerableCount++
+saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
+_, _ = out.Write([]byte(saveLine))
+}
+crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
+}
+crashStatus.SetText("P2P Скан завершен!")
+appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
+}(cleanText, outFile)
+}, myWindow)
+saveP2PDialog.SetFileName(defaultP2PFile)
+saveP2PDialog.Show()
+} else {
+if len(sampleSerial) != 10 {
+crashStatus.SetText("Ошибка: Для скана префикса должен быть 10 символов!")
+return
+}
+defaultCloudFile := fmt.Sprintf("serials.txt")
+saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+if err != nil || outFile == nil {
+crashStatus.SetText("Сканирование отменено")
+return
+}
+crashStatus.SetText("Сканирование запущено...")
+crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
+go func(out io.WriteCloser) {
+defer out.Close()
+ctx := context.Background()
+stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
+appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
+_, _ = out.Write([]byte(realSerial + "\n"))
+})
+if err != nil {
+crashStatus.SetText("Ошибка запуска сканера!")
+appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
+return
+}
+crashStatus.SetText("Готово!")
+appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
+}(outFile)
+}, myWindow)
+saveCloudDialog.SetFileName(defaultCloudFile)
+saveCloudDialog.Show()
+}
+})
+cloudForm := widget.NewForm(
+widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
+widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
+widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
+)
+crashContent := container.NewVBox(
+crashTitle,
+cloudForm,
+btnStartCloudScan,
+crashStatus,
+crashLog,
+backToMenuBtn2,
+)
+showMenu = func() {
+menuTitle := widget.NewLabelWithStyle(
+"Главное меню",
+fyne.TextAlignCenter,
+fyne.TextStyle{Bold: true},
+)
+btnCrash := widget.NewButton("1. Круш камер", func() {
+myWindow.SetContent(crashContent)
+})
+btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
+myWindow.SetContent(scanContent)
+})
+menuLayout := container.NewVBox(
+menuTitle,
+layout.NewSpacer(),
+btnCrash,
+btnScan,
+layout.NewSpacer(),
+)
+myWindow.SetContent(menuLayout)
+}
+showMenu()
+myWindow.Resize(fyne.NewSize(450, 550))
+myWindow.ShowAndRun()
+}
 func appendLog(entry *widget.Entry, text string) {
-	current := entry.Text
-	if current == "" {
-		entry.SetText(text)
-	} else {
-		entry.SetText(current + "\n" + text)
-	}
+current := entry.Text
+if current == "" {
+entry.SetText(text)
+} else {
+entry.SetText(current + "\n" + text)
+}
 }
