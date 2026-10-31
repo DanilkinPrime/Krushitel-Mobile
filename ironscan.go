@@ -103,7 +103,7 @@ type Result struct {
 
 func (r Result) Ok() bool { return r.Serial != "" }
 
-var LogHook func(format string, args ...any)
+var LogHook func(checked, success, total uint64)
 
 var hello = []byte{
 	0xa0, 0x05, 0x00, 0x60, 0x00, 0x00, 0x00, 0x00,
@@ -597,13 +597,38 @@ func Run(ctx context.Context, opts Options, onResult func(Result)) error {
 		seed = time.Now().UnixNano()
 	}
 	perm := newPerm(n, uint64(seed))
-	if LogHook != nil {
-		LogHook("[iron] seed=%d targets=%d (порядок Фейстель)", seed, n)
-	}
 
 	jobs := make(chan string)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+
+	// Локальные атомарные счетчики внутри ядра
+	var checkedCount uint64
+	var successCount uint64
+
+	// Запуск тикера (таймера), который обновляет GUI раз в 1 секунду
+	tickerCtx, cancelTicker := context.WithCancel(ctx)
+	defer cancelTicker()
+	
+	if LogHook != nil {
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					// Каждую секунду отправляем текущие цифры в GUI
+					LogHook(
+						atomic.LoadUint64(&checkedCount),
+						atomic.LoadUint64(&successCount),
+						uint64(n),
+					)
+				case <-tickerCtx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -617,13 +642,15 @@ func Run(ctx context.Context, opts Options, onResult func(Result)) error {
 				if ctx.Err() != nil {
 					continue
 				}
-				
-				// === ИСПРАВЛЕНИЕ: Вызываем LogHook для каждого проверенного IP ===
-				if LogHook != nil {
-					LogHook("Проверен адрес: %s", t)
-				}
+
+				// Увеличиваем общий счетчик проверенных IP
+				atomic.AddUint64(&checkedCount, 1)
 
 				mu.Lock()
+				// Проверяем результат, и если устройство "живое", увеличиваем успех
+				if r.Ok() {
+					atomic.AddUint64(&successCount, 1)
+				}
 				onResult(r)
 				mu.Unlock()
 			}
@@ -640,5 +667,11 @@ feed:
 	}
 	close(jobs)
 	wg.Wait()
+
+	// Финальный вызов LogHook, чтобы гарантированно показать 100% в конце сканирования
+	if LogHook != nil {
+		LogHook(atomic.LoadUint64(&checkedCount), atomic.LoadUint64(&successCount), uint64(n))
+	}
+
 	return nil
 }
