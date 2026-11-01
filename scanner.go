@@ -71,7 +71,7 @@ func (g *wsseGenerator) Gen() (digest, nonceStr, curdate string) {
 }
 
 // ScanCloudPrefix выполняет асинхронное сканирование пространства серийных номеров по заданному префиксу
-func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimit int, onAlive func(serial string)) (*ScanStats, error) {
+func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimit int, onAlive func(serial string), onProgress func(checked, success, total uint64)) (*ScanStats, error) {
 	startTime := time.Now()
 	
 	prefix = strings.ToUpper(strings.TrimSpace(prefix))
@@ -119,15 +119,16 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 	}
 
 	_ = conn.SetReadDeadline(time.Time{})
-
 	lport := conn.LocalAddr().(*net.UDPAddr).Port
 	var globalCSeq int64 = 2
-
 	var stats ScanStats
+	
+	// Константа общего числа комбинаций суффикса (16^5 = 1048576)
+	const SuffixCombos = 1048576 
+	var checkedCount uint64 = 0
 
 	pendingRequests := make(map[int64]requestState)
 	var mapMu sync.Mutex
-
 	jobs := make(chan int, 5000)
 	var wg sync.WaitGroup
 
@@ -161,25 +162,26 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 				if readErr != nil {
 					continue
 				}
-
 				resp := parseDHResp(readBuf[:readLen])
 				if resp.Code == 100 {
 					continue
 				}
-
 				mapMu.Lock()
 				state, exists := pendingRequests[resp.CSeq]
 				if exists {
 					delete(pendingRequests, resp.CSeq)
 				}
 				mapMu.Unlock()
-
 				if exists {
 					hasLocalAddr := strings.Contains(resp.Body, "<LocalAddr>") && strings.Contains(resp.Body, "</LocalAddr>")
 					if resp.Code >= 200 && resp.Code < 400 && hasLocalAddr {
 						atomic.AddUint64(&stats.TotalHits, 1)
 						if onAlive != nil {
 							onAlive(state.serial)
+						}
+						// Вызываем обновление прогресса при нахождении "живой" камеры
+						if onProgress != nil {
+							onProgress(atomic.LoadUint64(&checkedCount), atomic.LoadUint64(&stats.TotalHits), uint64(SuffixCombos))
 						}
 					}
 				}
@@ -214,42 +216,43 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 		go func() {
 			defer wg.Done()
 			var serialBuf [15]byte
-			copy(serialBuf[:10], []byte(prefix)) // ИСПРАВЛЕНО: приведение string к []byte для корректного copy()
-
+			copy(serialBuf[:10], []byte(prefix))
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
+			
 			for i := range jobs {
 				<-throttle
-
 				serialBuf[10] = hexChars[(i>>16)&0xF]
 				serialBuf[11] = hexChars[(i>>12)&0xF]
 				serialBuf[12] = hexChars[(i>>8)&0xF]
 				serialBuf[13] = hexChars[(i>>4)&0xF]
 				serialBuf[14] = hexChars[i&0xF]
 				currentSerial := string(serialBuf[:])
-
+				
 				cseq := atomic.AddInt64(&globalCSeq, 1)
-
 				aidVal := rng.Uint64()
 				aid := make([]byte, 8)
 				binary.LittleEndian.PutUint64(aid, aidVal)
-
 				body := p2pChannelBody(lport, aid)
 				d, nStr, cDate := wsse.Gen()
-
-				reqStr := fmt.Sprintf("DHPOST /device/%s/p2p-channel HTTP/1.1\r\nCSeq: %d\r\nAuthorization: WSSE profile=\"UsernameToken\"\r\nX-WSSE: UsernameToken Username=\"%s\", PasswordDigest=\"%s\", Nonce=\"%s\", Created=\"%s\"\r\nContent-Type: \r\nContent-Length: %d\r\n\r\n%s",
-					currentSerial, cseq, USERNAME, d, nStr, cDate, len(body), body)
-
+				
+				reqStr := fmt.Sprintf("DHPOST /device/%s/p2p-channel HTTP/1.1\r\nCSeq: %d\r\nAuthorization: WSSE profile=\"UsernameToken\"\r\nX-WSSE: UsernameToken Username=\"%s\", PasswordDigest=\"%s\", Nonce=\"%s\", Created=\"%s\"\r\nContent-Type: \r\nContent-Length: %d\r\n\r\n%s", currentSerial, cseq, USERNAME, d, nStr, cDate, len(body), body)
+				
 				mapMu.Lock()
 				pendingRequests[cseq] = requestState{
 					serial:    currentSerial,
 					timestamp: time.Now(),
 				}
 				mapMu.Unlock()
-
+				
 				_, err := conn.Write([]byte(reqStr))
 				if err == nil {
 					atomic.AddUint64(&stats.TotalSent, 1)
+				}
+				
+				// Инкрементируем счетчик отправленных запросов и дергаем прогресс-бар
+				currentChecked := atomic.AddUint64(&checkedCount, 1)
+				if onProgress != nil && currentChecked%100 == 0 { // Вызываем каждые 100 пакетов, чтобы не спамить UI
+					onProgress(currentChecked, atomic.LoadUint64(&stats.TotalHits), uint64(SuffixCombos))
 				}
 			}
 		}()
@@ -259,12 +262,16 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 		jobs <- i
 	}
 	close(jobs)
-
 	wg.Wait()
+	
 	time.Sleep(ACK_TIMEOUT)
 	close(stopChan)
-
 	stats.Duration = time.Since(startTime)
+	
+	if onProgress != nil {
+		onProgress(checkedCount, stats.TotalHits, uint64(SuffixCombos))
+	}
+	
 	return &stats, nil
 }
 
