@@ -386,7 +386,16 @@ vulnerableCount++
 saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
 _, _ = out.Write([]byte(saveLine))
 }
-crashStatus.SetText(fmt.Sprintf("P2P Прогресс: %d / %d (Уязвимо: %d)", atomic.LoadInt64(&currentIdx), totalValidLines, vulnerableCount))
+var percentage float64
+if totalValidLines > 0 {
+    percentage = (float64(atomic.LoadInt64(&currentIdx)) / float64(totalValidLines)) * 100
+}
+crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d", 
+    percentage, 
+    atomic.LoadInt64(&currentIdx), 
+    totalValidLines, 
+    vulnerableCount,
+))
 }
 crashStatus.SetText("P2P Скан завершен!")
 appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
@@ -411,8 +420,20 @@ go func(out io.WriteCloser) {
 defer out.Close()
 ctx := context.Background()
 stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
-appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
-_, _ = out.Write([]byte(realSerial + "\n"))
+    appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
+    _, _ = out.Write([]byte(realSerial + "\n"))
+}, func(checked, success, total uint64) { // <-- НАШ НОВЫЙ КОЛБЭК ПРОГРЕССА
+    var percentage float64
+    if total > 0 {
+        percentage = (float64(checked) / float64(total)) * 100
+    }
+    // Обновляем текст статуса прямо на лету
+    crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
+        percentage,
+        checked,
+        total,
+        success,
+    ))
 })
 if err != nil {
 crashStatus.SetText("Ошибка запуска сканера!")
