@@ -345,7 +345,7 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".txt"}))
 		fileDialog.Show()
 	})
-
+    var btnStartCloudScan *widget.Button
 	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
 		if selectedCloudFile == nil {
 			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
