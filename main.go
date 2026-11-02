@@ -92,7 +92,7 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 		fileDialog.Show()
 	})
     var btnStartIPScan *widget.Button
-	btnStartIPScan := widget.NewButton("Запуск Сканирования", func() {
+	btnStartIPScan = widget.NewButton("Запуск Сканирования", func() {
 		 if isScanning {
         if cancelScan != nil {
             cancelScan()
@@ -346,7 +346,7 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 		fileDialog.Show()
 	})
     var btnStartCloudScan *widget.Button
-	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
+	btnStartCloudScan = widget.NewButton("Запустить Скан", func() {
 		if selectedCloudFile == nil {
 			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
 			return
