@@ -21,7 +21,7 @@ const (
 	MAIN_PORT    = 8800
 	USERNAME     = "cba1b29e32cb17aa46b8ff9e73c7f40b"
 	USERKEY      = "996103384cdf19179e19243e959bbf8b"
-	SOCKET_BUF   = 1024 * 1024
+	SOCKET_BUF   = 4 * 1024 * 1024
 	SuffixCombos = 1 << 20
 	hexChars     = "0123456789ABCDEF"
 	BURST_LIMIT  = 64
@@ -251,7 +251,7 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 				
 				// Инкрементируем счетчик отправленных запросов и дергаем прогресс-бар
 				currentChecked := atomic.AddUint64(&checkedCount, 1)
-				if onProgress != nil && currentChecked%100 == 0 { // Вызываем каждые 100 пакетов, чтобы не спамить UI
+				if onProgress != nil && currentChecked%1000 == 0 { // Вызываем каждые 100 пакетов, чтобы не спамить UI
 					onProgress(currentChecked, atomic.LoadUint64(&stats.TotalHits), uint64(SuffixCombos))
 				}
 			}
