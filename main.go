@@ -91,7 +91,7 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".txt"}))
 		fileDialog.Show()
 	})
-
+    var btnStartIPScan *widget.Button
 	btnStartIPScan := widget.NewButton("Запуск Сканирования", func() {
 		 if isScanning {
         if cancelScan != nil {
