@@ -21,9 +21,6 @@ import (
 
 
 func main() {
-	var cancelScan context.CancelFunc
-	var isScanning bool
-
 	myApp := app.New()
 	myWindow := myApp.NewWindow("Android IronScan GUI")
 
@@ -59,17 +56,6 @@ func main() {
 			ruleEntry.SetText("Да")
 		}
 	})
-toggleScanState := func(startBtn *widget.Button, scanning bool) {
-    isScanning = scanning
-    if scanning {
-        startBtn.SetText("Остановить")
-        startBtn.Importance = widget.DangerImportance
-    } else {
-        startBtn.SetText("Запуск")
-        startBtn.Importance = widget.MediumImportance
-    }
-    startBtn.Refresh()
-}
 
 	// ПЕРЕМЕННАЯ ДЛЯ ХРАНЕНИЯ ВЫБРАННОГО ФАЙЛА В РЕЖИМЕ IP-СКАНА
 	var selectedIPFile fyne.URIReadCloser
@@ -91,35 +77,23 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".txt"}))
 		fileDialog.Show()
 	})
-    var btnStartIPScan *widget.Button
-	btnStartIPScan = widget.NewButton("Запуск Сканирования", func() {
-		 if isScanning {
-        if cancelScan != nil {
-            cancelScan()
-        }
-        statusLabel.SetText("Остановлено")
-        appendLog(logContent, "Остановка")
-        return
-    }
+
+	btnStartIPScan := widget.NewButton("Запуск Сканирования", func() {
 		if selectedIPFile == nil {
 			statusLabel.SetText("Ошибка: Сначала выберите файл с IP!")
 			return
 		}
-        toggleScanState(btnStartIPScan, true)
+
 		statusLabel.SetText("Обработка файла...")
 		logContent.SetText("[SYSTEM] Инициализация сканирования по файлу...\n")
 
 		// Запуск обработки в горутине, чтобы не вешать интерфейс
 		go func(r fyne.URIReadCloser) {
-			defer func() {
-            toggleScanState(btnStartIPScan, false)
-            r.Close()
-        }()
+			defer r.Close()
 			appendLog(logContent, "[SYSTEM] Чтение сырых данных из файла...")
 
 			data, err := io.ReadAll(r)
 			if err != nil {
-				toggleScanState(btnStartIPScan, false)
 				statusLabel.SetText("Не удалось прочитать файл")
 				appendLog(logContent, "[ERROR] Ошибка io.ReadAll: "+err.Error())
 				return
@@ -231,9 +205,7 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 						))
 					}
 
-					var ctx context.Context
-                ctx, cancelScan = context.WithCancel(context.Background())
-                defer cancelScan()
+					ctx := context.Background()
 
 					scanErr := Run(ctx, opts, func(res Result) {
 						if res.Ok() {
@@ -271,13 +243,8 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 					})
 
 					if scanErr != nil {
-						if ctx.Err() == context.Canceled {
-                        statusLabel.SetText("Сканирование остановлено")
-                        appendLog(logContent, "[SYSTEM] Сканирование успешно прервано.")
-                    } else {
-                        statusLabel.SetText("Ошибка сканера")
-                        appendLog(logContent, "Ошибка")
-                    }
+						statusLabel.SetText("Ошибка работы: " + scanErr.Error())
+						appendLog(logContent, "[ERROR] Сканер аварийно завершился: "+scanErr.Error())
 					} else {
 						finalSuccess := atomic.LoadUint64(&successCount)
 						statusLabel.SetText(fmt.Sprintf("Успешно! Найдено устройств: %d", finalSuccess))
@@ -312,7 +279,7 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 	crashStatus := widget.NewLabel("Ожидание ввода параметров...")
 
 	cloudWorkersEntry := widget.NewEntry()
-	cloudWorkersEntry.SetText("64")
+	cloudWorkersEntry.SetText("200")
 	cloudWorkersEntry.SetPlaceHolder("Потоки (UDP сокеты)")
 
 	cloudRpsEntry := widget.NewEntry()
@@ -345,8 +312,8 @@ toggleScanState := func(startBtn *widget.Button, scanning bool) {
 		fileDialog.SetFilter(storage.NewExtensionFileFilter([]string{".txt"}))
 		fileDialog.Show()
 	})
-    var btnStartCloudScan *widget.Button
-	btnStartCloudScan = widget.NewButton("Запустить Скан", func() {
+
+	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
 		if selectedCloudFile == nil {
 			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
 			return
@@ -451,8 +418,7 @@ crashStatus.SetText("Сканирование запущено...")
 crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
 go func(out io.WriteCloser) {
 defer out.Close()
-var ctx context.Context
-ctx, cancelScan = context.WithCancel(context.Background())
+ctx := context.Background()
 stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
     appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
     _, _ = out.Write([]byte(realSerial + "\n"))
