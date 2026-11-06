@@ -70,7 +70,6 @@ func (g *wsseGenerator) Gen() (digest, nonceStr, curdate string) {
 	return
 }
 
-// ScanCloudPrefix выполняет асинхронное сканирование пространства серийных номеров по заданному префиксу
 func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimit int, onAlive func(serial string), onProgress func(checked, success, total uint64)) (*ScanStats, error) {
 	startTime := time.Now()
 	
@@ -140,6 +139,8 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 	go func() {
 		for range rateTicker.C {
 			select {
+			case <-ctx.Done(): // Остановка тикера при отмене контекста
+				return
 			case throttle <- struct{}{}:
 			default:
 			}
@@ -155,6 +156,8 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 		for {
 			select {
 			case <-stopChan:
+				return
+			case <-ctx.Done(): // Прекращаем чтение, если контекст отменен
 				return
 			default:
 				_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
@@ -197,6 +200,8 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 			select {
 			case <-stopChan:
 				return
+			case <-ctx.Done(): // Выходим из очистки при отмене
+				return
 			case <-ticker.C:
 				now := time.Now()
 				mapMu.Lock()
@@ -220,7 +225,17 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 			rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 			
 			for i := range jobs {
-				<-throttle
+				// ПРОВЕРКА №1: Проверяем контекст перед отправкой очередного пакета
+				if ctx.Err() != nil {
+					return 
+				}
+
+				select {
+				case <-ctx.Done(): // На случай, если воркер завис на ожидании рейт-лимитера
+					return
+				case <-throttle:
+				}
+
 				serialBuf[10] = hexChars[(i>>16)&0xF]
 				serialBuf[11] = hexChars[(i>>12)&0xF]
 				serialBuf[12] = hexChars[(i>>8)&0xF]
@@ -251,28 +266,43 @@ func ScanCloudPrefix(ctx context.Context, prefix string, maxWorkers int, rpsLimi
 				
 				// Инкрементируем счетчик отправленных запросов и дергаем прогресс-бар
 				currentChecked := atomic.AddUint64(&checkedCount, 1)
-				if onProgress != nil && currentChecked%1000 == 0 { // Вызываем каждые 100 пакетов, чтобы не спамить UI
+				if onProgress != nil && currentChecked%1000 == 0 { // Вызываем каждые 1000 пакетов, чтобы не спамить UI
 					onProgress(currentChecked, atomic.LoadUint64(&stats.TotalHits), uint64(SuffixCombos))
 				}
 			}
 		}()
 	}
 
+	// Заполнение очереди задач с отслеживанием отмены контекста
 	for i := 0; i < SuffixCombos; i++ {
-		jobs <- i
+		// ПРОВЕРКА №2: Если нажата кнопка Стоп, прекращаем генерировать задачи
+		if ctx.Err() != nil {
+			break
+		}
+		
+		select {
+		case <-ctx.Done():
+			break
+		case jobs <- i:
+		}
 	}
 	close(jobs)
 	wg.Wait()
 	
-	time.Sleep(ACK_TIMEOUT)
+	// Если отмена произошла, то выходим без ожидания ACK таймаута
+	if ctx.Err() == nil {
+		time.Sleep(ACK_TIMEOUT)
+	}
+	
 	close(stopChan)
 	stats.Duration = time.Since(startTime)
 	
 	if onProgress != nil {
-		onProgress(checkedCount, stats.TotalHits, uint64(SuffixCombos))
+		onProgress(atomic.LoadUint64(&checkedCount), stats.TotalHits, uint64(SuffixCombos))
 	}
 	
-	return &stats, nil
+	// Возвращаем ctx.Err(), чтобы GUI понимал, что завершение было принудительным
+	return &stats, ctx.Err()
 }
 
 func parseDHResp(data []byte) dhResp {
