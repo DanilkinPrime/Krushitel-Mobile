@@ -19,7 +19,6 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-
 func main() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("Android IronScan GUI")
@@ -59,7 +58,7 @@ func main() {
 
 	// ПЕРЕМЕННАЯ ДЛЯ ХРАНЕНИЯ ВЫБРАННОГО ФАЙЛА В РЕЖИМЕ IP-СКАНА
 	var selectedIPFile fyne.URIReadCloser
-    var isIPScanning bool
+	var isIPScanning bool
 	var cancelIPScan context.CancelFunc
 
 	var isCloudScanning bool
@@ -82,7 +81,7 @@ func main() {
 		fileDialog.Show()
 	})
 
-		var btnStartIPScan *widget.Button
+	var btnStartIPScan *widget.Button
 	btnStartIPScan = widget.NewButton("Запуск Сканирования", nil)
 	btnStartIPScan.OnTapped = func() {
 		// Если сканирование уже запущено — отменяем контекст и выходим
@@ -308,7 +307,6 @@ func main() {
 		}(selectedIPFile)
 	}
 
-
 	// Добавили кнопку выбора файла прямо в форму настроек
 	settingsForm := widget.NewForm(
 		widget.NewFormItem("Исходный файл с IP:", btnChooseIPFile),
@@ -364,7 +362,7 @@ func main() {
 		fileDialog.Show()
 	})
 
-		var btnStartCloudScan *widget.Button
+	var btnStartCloudScan *widget.Button
 	btnStartCloudScan = widget.NewButton("Запустить Скан", nil)
 	btnStartCloudScan.OnTapped = func() {
 		// Если сканирование уже запущено — отменяем контекст и выходим
@@ -474,10 +472,10 @@ func main() {
 						if totalValidLines > 0 {
 							percentage = (float64(atomic.LoadInt64(&currentIdx)) / float64(totalValidLines)) * 100
 						}
-						crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d", 
-							percentage, 
-							atomic.LoadInt64(&currentIdx), 
-							totalValidLines, 
+						crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
+							percentage,
+							atomic.LoadInt64(&currentIdx),
+							totalValidLines,
 							vulnerableCount,
 						))
 					}
@@ -556,49 +554,49 @@ func main() {
 			saveCloudDialog.Show()
 		}
 	}
-cloudForm := widget.NewForm(
-widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
-widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
-widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
-)
-crashContent := container.NewVBox(
-crashTitle,
-cloudForm,
-btnStartCloudScan,
-crashStatus,
-crashLog,
-backToMenuBtn2,
-)
-showMenu = func() {
-menuTitle := widget.NewLabelWithStyle(
-"Главное меню",
-fyne.TextAlignCenter,
-fyne.TextStyle{Bold: true},
-)
-btnCrash := widget.NewButton("1. Круш камер", func() {
-myWindow.SetContent(crashContent)
-})
-btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
-myWindow.SetContent(scanContent)
-})
-menuLayout := container.NewVBox(
-menuTitle,
-layout.NewSpacer(),
-btnCrash,
-btnScan,
-layout.NewSpacer(),
-)
-myWindow.SetContent(menuLayout)
-}
-showMenu()
-myWindow.Resize(fyne.NewSize(450, 550))
-myWindow.ShowAndRun()
+	cloudForm := widget.NewForm(
+		widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
+		widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
+		widget.NewFormItem("Исходный файл:", btnChooseCloudFile),
+	)
+	crashContent := container.NewVBox(
+		crashTitle,
+		cloudForm,
+		btnStartCloudScan,
+		crashStatus,
+		crashLog,
+		backToMenuBtn2,
+	)
+	showMenu = func() {
+		menuTitle := widget.NewLabelWithStyle(
+			"Главное меню",
+			fyne.TextAlignCenter,
+			fyne.TextStyle{Bold: true},
+		)
+		btnCrash := widget.NewButton("1. Круш камер", func() {
+			myWindow.SetContent(crashContent)
+		})
+		btnScan := widget.NewButton("2. Скан префиксов из айпи", func() {
+			myWindow.SetContent(scanContent)
+		})
+		menuLayout := container.NewVBox(
+			menuTitle,
+			layout.NewSpacer(),
+			btnCrash,
+			btnScan,
+			layout.NewSpacer(),
+		)
+		myWindow.SetContent(menuLayout)
+	}
+	showMenu()
+	myWindow.Resize(fyne.NewSize(450, 550))
+	myWindow.ShowAndRun()
 }
 func appendLog(entry *widget.Entry, text string) {
-current := entry.Text
-if current == "" {
-entry.SetText(text)
-} else {
-entry.SetText(current + "\n" + text)
-}
+	current := entry.Text
+	if current == "" {
+		entry.SetText(text)
+	} else {
+		entry.SetText(current + "\n" + text)
+	}
 }
