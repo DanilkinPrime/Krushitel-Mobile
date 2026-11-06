@@ -419,7 +419,6 @@ func main() {
 		isCloudScanning = true
 		btnStartCloudScan.SetText("Остановить Скан")
 
-		var scanStarted bool
 
 		isFileWithSerials := len(sampleSerial) >= 13
 		if isFileWithSerials {
@@ -432,7 +431,6 @@ func main() {
 					return
 				}
 
-				scanStarted = true
 				crashStatus.SetText("Крушим камеры")
 				crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
 				connTimeout := 6 * time.Second
@@ -507,7 +505,6 @@ func main() {
 					return
 				}
 
-				scanStarted = true
 				crashStatus.SetText("Сканирование запущено...")
 				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
 
