@@ -600,7 +600,7 @@ func Run(ctx context.Context, opts Options, onResult func(Result)) error {
 	}
 	perm := newPerm(n, uint64(seed))
 
-	jobs := make(chan string)
+	jobs := make(chan string, workers) // Добавили небольшой буфер для оптимизации работы пула
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -637,12 +637,13 @@ func Run(ctx context.Context, opts Options, onResult func(Result)) error {
 		go func() {
 			defer wg.Done()
 			for t := range jobs {
+				// ПРАВКА №1: Заменяем continue на return для мгновенного завершения горутины воркера
 				if ctx.Err() != nil {
-					continue
+					return
 				}
 				r := probeDevice(ctx, t, opts.Port, opts.Timeout, opts.Retries)
 				if ctx.Err() != nil {
-					continue
+					return
 				}
 
 				// Увеличиваем общий счетчик проверенных IP
@@ -675,5 +676,6 @@ feed:
 		LogHook(atomic.LoadUint64(&checkedCount), atomic.LoadUint64(&successCount), uint64(n))
 	}
 
-	return nil
+	// ПРАВКА №2: Возвращаем ошибку контекста, если сканирование было принудительно остановлено
+	return ctx.Err()
 }
