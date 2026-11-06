@@ -59,7 +59,11 @@ func main() {
 
 	// ПЕРЕМЕННАЯ ДЛЯ ХРАНЕНИЯ ВЫБРАННОГО ФАЙЛА В РЕЖИМЕ IP-СКАНА
 	var selectedIPFile fyne.URIReadCloser
+    var isIPScanning bool
+	var cancelIPScan context.CancelFunc
 
+	var isCloudScanning bool
+	var cancelCloudScan context.CancelFunc
 	btnChooseIPFile := widget.NewButton("Выбрать файл с IP", func() {
 		fileDialog := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
 			if err != nil {
@@ -78,7 +82,19 @@ func main() {
 		fileDialog.Show()
 	})
 
-	btnStartIPScan := widget.NewButton("Запуск Сканирования", func() {
+		var btnStartIPScan *widget.Button
+	btnStartIPScan = widget.NewButton("Запуск Сканирования", nil)
+	btnStartIPScan.OnTapped = func() {
+		// Если сканирование уже запущено — отменяем контекст и выходим
+		if isIPScanning {
+			if cancelIPScan != nil {
+				cancelIPScan()
+			}
+			statusLabel.SetText("Остановка сканирования...")
+			appendLog(logContent, "[SYSTEM] Запрос на отмену отправлен. Ожидание завершения воркеров...")
+			return
+		}
+
 		if selectedIPFile == nil {
 			statusLabel.SetText("Ошибка: Сначала выберите файл с IP!")
 			return
@@ -87,9 +103,25 @@ func main() {
 		statusLabel.SetText("Обработка файла...")
 		logContent.SetText("[SYSTEM] Инициализация сканирования по файлу...\n")
 
+		// Переключаем состояние интерфейса на "Сканирование"
+		isIPScanning = true
+		btnStartIPScan.SetText("Остановить Сканирование")
+
 		// Запуск обработки в горутине, чтобы не вешать интерфейс
 		go func(r fyne.URIReadCloser) {
-			defer r.Close()
+			// Локальный флаг для отслеживания, дошли ли мы до стадии запуска сетевого сканера
+			var scanStarted bool
+
+			defer func() {
+				r.Close()
+				// Если диалог сохранения отменили или произошла ошибка ДО запуска Run,
+				// возвращаем кнопку в исходное состояние прямо здесь
+				if !scanStarted {
+					isIPScanning = false
+					btnStartIPScan.SetText("Запуск Сканирования")
+				}
+			}()
+
 			appendLog(logContent, "[SYSTEM] Чтение сырых данных из файла...")
 
 			data, err := io.ReadAll(r)
@@ -165,22 +197,34 @@ func main() {
 			defaultFileName := fmt.Sprintf("Prefixes.txt")
 
 			saveDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-				var successCount uint64 = 0
-
 				if err != nil {
 					statusLabel.SetText("Ошибка создания файла: " + err.Error())
+					isIPScanning = false
+					btnStartIPScan.SetText("Запуск Сканирования")
 					return
 				}
 				if outFile == nil {
 					statusLabel.SetText("Сохранение результатов отменено")
+					isIPScanning = false
+					btnStartIPScan.SetText("Запуск Сканирования")
 					return
 				}
+
+				// Фиксируем, что диалог успешно пройден и сетевой сканер запускается
+				scanStarted = true
 
 				appendLog(logContent, "[SYSTEM] Выходной файл подтвержден. Запуск сетевых воркеров...")
 				statusLabel.SetText(fmt.Sprintf("Сканирование %d целей...", len(finalTargets)))
 
 				go func(out fyne.URIWriteCloser) {
-					defer out.Close()
+					var successCount uint64 = 0
+
+					defer func() {
+						out.Close()
+						// Сбрасываем флаги сканирования в графическом интерфейсе
+						isIPScanning = false
+						btnStartIPScan.SetText("Запуск Сканирования")
+					}()
 
 					opts := Options{
 						Targets:     finalTargets,
@@ -205,7 +249,9 @@ func main() {
 						))
 					}
 
-					ctx := context.Background()
+					// Создаем контекст с возможностью отмены
+					var ctx context.Context
+					ctx, cancelIPScan = context.WithCancel(context.Background())
 
 					scanErr := Run(ctx, opts, func(res Result) {
 						if res.Ok() {
@@ -242,7 +288,11 @@ func main() {
 						}
 					})
 
-					if scanErr != nil {
+					// Проверяем статус завершения: обычный выход, ошибка или отмена пользователем
+					if ctx.Err() == context.Canceled {
+						statusLabel.SetText("Сканирование остановлено пользователем")
+						appendLog(logContent, "[SYSTEM] Сканирование принудительно прервано.")
+					} else if scanErr != nil {
 						statusLabel.SetText("Ошибка работы: " + scanErr.Error())
 						appendLog(logContent, "[ERROR] Сканер аварийно завершился: "+scanErr.Error())
 					} else {
@@ -256,7 +306,8 @@ func main() {
 			saveDialog.SetFileName(defaultFileName)
 			saveDialog.Show()
 		}(selectedIPFile)
-	})
+	}
+
 
 	// Добавили кнопку выбора файла прямо в форму настроек
 	settingsForm := widget.NewForm(
@@ -313,7 +364,19 @@ func main() {
 		fileDialog.Show()
 	})
 
-	btnStartCloudScan := widget.NewButton("Запустить Скан", func() {
+		var btnStartCloudScan *widget.Button
+	btnStartCloudScan = widget.NewButton("Запустить Скан", nil)
+	btnStartCloudScan.OnTapped = func() {
+		// Если сканирование уже запущено — отменяем контекст и выходим
+		if isCloudScanning {
+			if cancelCloudScan != nil {
+				cancelCloudScan()
+			}
+			crashStatus.SetText("Остановка сканирования...")
+			appendLog(crashLog, "[SYSTEM] Запрос на отмену отправлен. Ожидание завершения воркеров...")
+			return
+		}
+
 		if selectedCloudFile == nil {
 			crashStatus.SetText("Ошибка: Сначала выберите исходный файл!")
 			return
@@ -336,118 +399,163 @@ func main() {
 			return
 		}
 
-cleanText := strings.ReplaceAll(string(fileData), "\r", "")
-lines := strings.Split(cleanText, "\n")
-var sampleSerial string
-var totalValidLines int
-for _, line := range lines {
-line = strings.TrimSpace(line)
-if line != "" && !strings.HasPrefix(line, "#") {
-totalValidLines++
-if sampleSerial == "" {
-sampleSerial = line
-}
-}
-}
-if totalValidLines == 0 {
-crashStatus.SetText("Ошибка: Выбранный файл пуст!")
-return
-}
-isFileWithSerials := len(sampleSerial) >= 13
-if isFileWithSerials {
-defaultP2PFile := fmt.Sprintf("krushed.txt")
-saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-if err != nil || outFile == nil {
-crashStatus.SetText("Сохранение отменено")
-return
-}
-crashStatus.SetText("Крушим камеры")
-crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
-connTimeout := 6 * time.Second
-moduleChan := make(chan P2PScanResult, 100)
-go func(fileContent string, out io.WriteCloser) {
-defer out.Close()
-reader := strings.NewReader(fileContent)
-ctx := context.Background()
-err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
-if err != nil {
-crashStatus.SetText("Ошибка модуля!")
-appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
-return
-}
-vulnerableCount := 0
-var currentIdx int64 = 0
-for res := range moduleChan {
-atomic.AddInt64(&currentIdx, 1)
-statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
-appendLog(crashLog, statusText)
-if res.Vulnerable {
-vulnerableCount++
-saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
-_, _ = out.Write([]byte(saveLine))
-}
-var percentage float64
-if totalValidLines > 0 {
-    percentage = (float64(atomic.LoadInt64(&currentIdx)) / float64(totalValidLines)) * 100
-}
-crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d", 
-    percentage, 
-    atomic.LoadInt64(&currentIdx), 
-    totalValidLines, 
-    vulnerableCount,
-))
-}
-crashStatus.SetText("P2P Скан завершен!")
-appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
-}(cleanText, outFile)
-}, myWindow)
-saveP2PDialog.SetFileName(defaultP2PFile)
-saveP2PDialog.Show()
-} else {
-if len(sampleSerial) != 10 {
-crashStatus.SetText("Ошибка: Для скана префикса должен быть 10 символов!")
-return
-}
-defaultCloudFile := fmt.Sprintf("serials.txt")
-saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
-if err != nil || outFile == nil {
-crashStatus.SetText("Сканирование отменено")
-return
-}
-crashStatus.SetText("Сканирование запущено...")
-crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
-go func(out io.WriteCloser) {
-defer out.Close()
-ctx := context.Background()
-stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
-    appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
-    _, _ = out.Write([]byte(realSerial + "\n"))
-}, func(checked, success, total uint64) { // <-- НАШ НОВЫЙ КОЛБЭК ПРОГРЕССА
-    var percentage float64
-    if total > 0 {
-        percentage = (float64(checked) / float64(total)) * 100
-    }
-    // Обновляем текст статуса прямо на лету
-    crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
-        percentage,
-        checked,
-        total,
-        success,
-    ))
-})
-if err != nil {
-crashStatus.SetText("Ошибка запуска сканера!")
-appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
-return
-}
-crashStatus.SetText("Готово!")
-appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
-}(outFile)
-}, myWindow)
-saveCloudDialog.SetFileName(defaultCloudFile)
-saveCloudDialog.Show()
-}
-})
+		cleanText := strings.ReplaceAll(string(fileData), "\r", "")
+		lines := strings.Split(cleanText, "\n")
+		var sampleSerial string
+		var totalValidLines int
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				totalValidLines++
+				if sampleSerial == "" {
+					sampleSerial = line
+				}
+			}
+		}
+		if totalValidLines == 0 {
+			crashStatus.SetText("Ошибка: Выбранный файл пуст!")
+			return
+		}
+
+		// Переключаем интерфейс в режим "Активного сканирования"
+		isCloudScanning = true
+		btnStartCloudScan.SetText("Остановить Скан")
+
+		var scanStarted bool
+
+		isFileWithSerials := len(sampleSerial) >= 13
+		if isFileWithSerials {
+			defaultP2PFile := fmt.Sprintf("krushed.txt")
+			saveP2PDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+				if err != nil || outFile == nil {
+					crashStatus.SetText(err.Error() + " или сохранение отменено")
+					isCloudScanning = false
+					btnStartCloudScan.SetText("Запустить Скан")
+					return
+				}
+
+				scanStarted = true
+				crashStatus.SetText("Крушим камеры")
+				crashLog.SetText("[SYSTEM] Файл распознан как список серийных номеров. Запуск записи...\n")
+				connTimeout := 6 * time.Second
+				moduleChan := make(chan P2PScanResult, 100)
+
+				// Инициализация отменяемого контекста
+				var ctx context.Context
+				ctx, cancelCloudScan = context.WithCancel(context.Background())
+
+				go func(fileContent string, out io.WriteCloser) {
+					defer func() {
+						out.Close()
+						isCloudScanning = false
+						btnStartCloudScan.SetText("Запустить Скан")
+					}()
+
+					reader := strings.NewReader(fileContent)
+					err := StartP2PModuleScan(ctx, reader, workers, connTimeout, moduleChan)
+					if err != nil {
+						crashStatus.SetText("Ошибка модуля!")
+						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
+						return
+					}
+
+					vulnerableCount := 0
+					var currentIdx int64 = 0
+					for res := range moduleChan {
+						atomic.AddInt64(&currentIdx, 1)
+						statusText := fmt.Sprintf("[%s] Serial: %s | %s", res.Status, res.Serial, res.Details)
+						appendLog(crashLog, statusText)
+						if res.Vulnerable {
+							vulnerableCount++
+							saveLine := fmt.Sprintf("%s;%s;%s\n", res.Serial, res.Status, res.Details)
+							_, _ = out.Write([]byte(saveLine))
+						}
+						var percentage float64
+						if totalValidLines > 0 {
+							percentage = (float64(atomic.LoadInt64(&currentIdx)) / float64(totalValidLines)) * 100
+						}
+						crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d", 
+							percentage, 
+							atomic.LoadInt64(&currentIdx), 
+							totalValidLines, 
+							vulnerableCount,
+						))
+					}
+
+					if ctx.Err() == context.Canceled {
+						crashStatus.SetText("Остановлено пользователем")
+						appendLog(crashLog, "[SYSTEM] Проверка принудительно прервана пользователем.")
+					} else {
+						crashStatus.SetText("P2P Скан завершен!")
+						appendLog(crashLog, fmt.Sprintf("[SYSTEM] Проверка окончена. Уязвимых устройств сохранено: %d.", vulnerableCount))
+					}
+				}(cleanText, outFile)
+			}, myWindow)
+			saveP2PDialog.SetFileName(defaultP2PFile)
+			saveP2PDialog.Show()
+		} else {
+			if len(sampleSerial) != 10 {
+				crashStatus.SetText("Ошибка: Для скана префикса должен быть 10 символов!")
+				isCloudScanning = false
+				btnStartCloudScan.SetText("Запустить Скан")
+				return
+			}
+			defaultCloudFile := fmt.Sprintf("serials.txt")
+			saveCloudDialog := dialog.NewFileSave(func(outFile fyne.URIWriteCloser, err error) {
+				if err != nil || outFile == nil {
+					crashStatus.SetText("Сканирование отменено")
+					isCloudScanning = false
+					btnStartCloudScan.SetText("Запустить Скан")
+					return
+				}
+
+				scanStarted = true
+				crashStatus.SetText("Сканирование запущено...")
+				crashLog.SetText("[SYSTEM] Выходной файл создан. Инициализация Сканера...\n")
+
+				// Инициализация отменяемого контекста
+				var ctx context.Context
+				ctx, cancelCloudScan = context.WithCancel(context.Background())
+
+				go func(out io.WriteCloser) {
+					defer func() {
+						out.Close()
+						isCloudScanning = false
+						btnStartCloudScan.SetText("Запустить Скан")
+					}()
+
+					stats, err := ScanCloudPrefix(ctx, sampleSerial, workers, rps, func(realSerial string) {
+						appendLog(crashLog, fmt.Sprintf("[ALIVE] Найдена камера: %s", realSerial))
+						_, _ = out.Write([]byte(realSerial + "\n"))
+					}, func(checked, success, total uint64) {
+						var percentage float64
+						if total > 0 {
+							percentage = (float64(checked) / float64(total)) * 100
+						}
+						crashStatus.SetText(fmt.Sprintf("Прогресс: %.2f%% (%d / %d) | Найдено: %d",
+							percentage,
+							checked,
+							total,
+							success,
+						))
+					})
+
+					if ctx.Err() == context.Canceled {
+						crashStatus.SetText("Сканирование прервано")
+						appendLog(crashLog, "[SYSTEM] Сканирование принудительно остановлено.")
+					} else if err != nil {
+						crashStatus.SetText("Ошибка запуска сканера!")
+						appendLog(crashLog, "[ERROR] Прервано: "+err.Error())
+					} else {
+						crashStatus.SetText("Готово!")
+						appendLog(crashLog, fmt.Sprintf("Проверено: %d, Живых: %d", stats.TotalSent, stats.TotalHits))
+					}
+				}(outFile)
+			}, myWindow)
+			saveCloudDialog.SetFileName(defaultCloudFile)
+			saveCloudDialog.Show()
+		}
+	}
 cloudForm := widget.NewForm(
 widget.NewFormItem("Воркеры (Сокеты):", cloudWorkersEntry),
 widget.NewFormItem("Лимит RPS:", cloudRpsEntry),
