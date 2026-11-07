@@ -105,7 +105,8 @@ func main() {
 		// Переключаем состояние интерфейса на "Сканирование"
 		isIPScanning = true
 		btnStartIPScan.SetText("Остановить Сканирование")
-
+        var ctx context.Context
+        ctx, cancelIPScan = context.WithCancel(context.Background())
 		// Запуск обработки в горутине, чтобы не вешать интерфейс
 		go func(r fyne.URIReadCloser) {
 			// Локальный флаг для отслеживания, дошли ли мы до стадии запуска сетевого сканера
@@ -247,10 +248,6 @@ func main() {
 							success,
 						))
 					}
-
-					// Создаем контекст с возможностью отмены
-					var ctx context.Context
-					ctx, cancelIPScan = context.WithCancel(context.Background())
 
 					scanErr := Run(ctx, opts, func(res Result) {
 						if res.Ok() {
